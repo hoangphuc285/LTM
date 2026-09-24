@@ -23,7 +23,7 @@ public class FTPConnection {
         return readResponse();
     }
 
-    public FTPResponse sendCommand(String command, String argument) throws IOException {
+    public synchronized FTPResponse sendCommand(String command, String argument) throws IOException {
         if (!connected) {
             throw new IllegalStateException("Chưa kết nối đến FTP Server.");
         }
