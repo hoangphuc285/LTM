@@ -43,7 +43,7 @@ public class FTPConnection {
     public synchronized FTPResponse readResponse() throws IOException {
         String line = reader.readLine();
         if (line == null) {
-            return new FTPResponse(500, "Kết nối bị ngắt từ Server.");
+            return new FTPResponse(500, "Kết nối bị ngắt từ Server");
         }
 
         FTPResponse firstLineResponse = FTPResponseParser.parse(line);
