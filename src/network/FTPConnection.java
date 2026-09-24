@@ -13,13 +13,12 @@ public class FTPConnection {
     private BufferedWriter writer;
     private boolean connected = false;
 
-    public FTPResponse connect(String host, int port) throws IOException {
+    public synchronized FTPResponse connect(String host, int port) throws IOException {
         controlSocket = new Socket(host, port);
         reader = new BufferedReader(new InputStreamReader(controlSocket.getInputStream()));
         writer = new BufferedWriter(new OutputStreamWriter(controlSocket.getOutputStream()));
         connected = true;
 
-        // Đọc thông điệp chào mừng (220 Welcome) từ FTP Server
         return readResponse();
     }
 
@@ -27,6 +26,9 @@ public class FTPConnection {
         if (!connected) {
             throw new IllegalStateException("Chưa kết nối đến FTP Server.");
         }
+
+        // Dọn dẹp các thông điệp thừa còn đọng lại trong bộ nhớ đệm (nếu có)
+        clearPendingResponses();
 
         String fullCommand = (argument != null && !argument.trim().isEmpty())
                 ? command + " " + argument
@@ -38,7 +40,7 @@ public class FTPConnection {
         return readResponse();
     }
 
-    public FTPResponse readResponse() throws IOException {
+    public synchronized FTPResponse readResponse() throws IOException {
         String line = reader.readLine();
         if (line == null) {
             return new FTPResponse(500, "Kết nối bị ngắt từ Server.");
@@ -46,7 +48,6 @@ public class FTPConnection {
 
         FTPResponse firstLineResponse = FTPResponseParser.parse(line);
 
-        // Xử lý phản hồi nhiều dòng (dạng "220-Header \n ... \n 220 End")
         if (line.length() >= 4 && line.charAt(3) == '-') {
             StringBuilder fullMessage = new StringBuilder(firstLineResponse.getMessage());
             while ((line = reader.readLine()) != null) {
@@ -61,7 +62,13 @@ public class FTPConnection {
         return firstLineResponse;
     }
 
-    public void disconnect() {
+    private void clearPendingResponses() throws IOException {
+        while (reader != null && reader.ready()) {
+            reader.readLine();
+        }
+    }
+
+    public synchronized void disconnect() {
         try {
             if (connected) {
                 sendCommand(FTPCommand.QUIT, null);
