@@ -33,7 +33,7 @@ public class FileTransferService {
         Matcher matcher = pattern.matcher(response.getMessage());
 
         if (!matcher.find()) {
-            throw new IOException("Định dạng phản hồi PASV không hợp lệ:" + response.getMessage());
+            throw new IOException("Định dạng phản hồi PASV không hợp lệ: " + response.getMessage());
         }
 
         String host = matcher.group(1) + "." + matcher.group(2) + "." + matcher.group(3) + "." + matcher.group(4);
