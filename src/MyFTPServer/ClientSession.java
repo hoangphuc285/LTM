@@ -17,6 +17,7 @@ public class ClientSession implements Runnable {
     private String currentUser = null;
     private boolean isLoggedIn = false;
     private String currentPath = "/";
+    private String renameFromPath = null;
 
     // Socket phục vụ Kênh dữ liệu
     private ServerSocket passiveServerSocket = null;
@@ -123,11 +124,10 @@ public class ClientSession implements Runnable {
                 try (Socket dataSocket = passiveServerSocket.accept();
                      BufferedWriter dataWriter = new BufferedWriter(new OutputStreamWriter(dataSocket.getOutputStream()))) {
 
-                    File userHome = fileManager.getUserHomeDir(currentUser);
-                    File[] files = userHome.listFiles();
+                    File currentDir = new File(fileManager.getUserHomeDir(currentUser), currentPath.equals("/") ? "" : currentPath);
+                    File[] files = currentDir.listFiles();
                     if (files != null) {
                         for (File f : files) {
-                            // Định dạng tự định nghĩa: Tên;DungLượng;LàThưMục
                             dataWriter.write(f.getName() + ";" + f.length() + ";" + f.isDirectory() + "\r\n");
                         }
                     }
@@ -138,13 +138,12 @@ public class ClientSession implements Runnable {
 
             case "RETR":
                 if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
-                sendResponse("150 Opening BINARY mode data connection for download.");
-
-                File downloadFile = new File(fileManager.getUserHomeDir(currentUser), argument);
+                File downloadFile = getFileInCurrentDir(argument);
                 if (!downloadFile.exists()) {
                     sendResponse("550 File not found.");
                     break;
                 }
+                sendResponse("150 Opening BINARY mode data connection for download.");
 
                 try (Socket dataSocket = passiveServerSocket.accept();
                      FileInputStream fis = new FileInputStream(downloadFile);
@@ -157,6 +156,7 @@ public class ClientSession implements Runnable {
                     }
                     os.flush();
                 }
+                gui.log("Client [" + clientIp + "] đã tải xuống tập tin: " + argument);
                 sendResponse("226 Transfer complete.");
                 break;
 
@@ -164,7 +164,7 @@ public class ClientSession implements Runnable {
                 if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
                 sendResponse("150 Ok to send data.");
 
-                File uploadFile = new File(fileManager.getUserHomeDir(currentUser), argument);
+                File uploadFile = getFileInCurrentDir(argument);
                 try (Socket dataSocket = passiveServerSocket.accept();
                      InputStream is = dataSocket.getInputStream();
                      FileOutputStream fos = new FileOutputStream(uploadFile)) {
@@ -176,13 +176,78 @@ public class ClientSession implements Runnable {
                     }
                     fos.flush();
                 }
+                gui.log("Client [" + clientIp + "] đã tải lên tập tin: " + argument);
+                gui.refreshUserFiles(currentUser);
                 sendResponse("226 Transfer complete.");
                 break;
+            case "MKD":
+                if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
+                File newDir = getFileInCurrentDir(argument);
 
-            default:
-                sendResponse(FTPResponse.R_500_UNKNOWN);
+                // Sử dụng mkdirs() thay vì mkdir() để tự tạo đủ cây thư mục
+                if (newDir.mkdirs()) {
+                    gui.log("Client [" + clientIp + "] đã tạo thư mục: " + argument);
+                    gui.refreshUserFiles(currentUser);
+                    sendResponse("257 \"" + argument + "\" directory created.");
+                } else {
+                    sendResponse("550 Create directory failed.");
+                }
+                break;
+
+            case "RMD":
+                if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
+                File dirToDelete = getFileInCurrentDir(argument);
+                if (dirToDelete.exists() && dirToDelete.isDirectory() && dirToDelete.delete()) {
+                    gui.log("Client [" + clientIp + "] đã xóa thư mục: " + argument);
+                    gui.refreshUserFiles(currentUser);
+                    sendResponse("250 Directory removed.");
+                } else {
+                    sendResponse("550 Remove directory failed.");
+                }
+                break;
+
+            case "DELE":
+                if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
+                File fileToDelete = getFileInCurrentDir(argument);
+                if (fileToDelete.exists() && fileToDelete.isFile() && fileToDelete.delete()) {
+                    gui.log("Client [" + clientIp + "] đã xóa tập tin: " + argument);
+                    gui.refreshUserFiles(currentUser);
+                    sendResponse("250 File deleted.");
+                } else {
+                    sendResponse("550 Delete file failed.");
+                }
+                break;
+            case "RNFR":
+                if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
+                File fileToRename = getFileInCurrentDir(argument); // Đã sửa: Tìm file trong thư mục hiện tại
+                if (fileToRename.exists()) {
+                    renameFromPath = argument;
+                    sendResponse("350 Requested file action pending further information.");
+                } else {
+                    sendResponse("550 File not found.");
+                }
+                break;
+
+            case "RNTO":
+                if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
+                if (renameFromPath == null) {
+                    sendResponse("503 Bad sequence of commands.");
+                    break;
+                }
+                File srcFile = getFileInCurrentDir(renameFromPath); // Đã sửa: Ghép đúng vị trí file cũ
+                File destFile = getFileInCurrentDir(argument);      // Đã sửa: Ghép đúng vị trí tên mới
+
+                if (srcFile.renameTo(destFile)) {
+                    gui.log("Client [" + clientIp + "] đã đổi tên: " + renameFromPath + " -> " + argument);
+                    gui.refreshUserFiles(currentUser);
+                    sendResponse("250 File renamed successfully.");
+                } else {
+                    sendResponse("550 Rename failed.");
+                }
+                renameFromPath = null;
                 break;
         }
+
     }
 
     private void sendResponse(String response) throws IOException {
@@ -201,5 +266,23 @@ public class ClientSession implements Runnable {
                 gui.log("Client [" + clientIp + "] đã ngắt kết nối.");
             }
         }
+    }
+    private File getFileInCurrentDir(String argument) {
+        File userHome = fileManager.getUserHomeDir(currentUser);
+
+        // Bóc tách dấu '/' ở đầu currentPath để tránh lỗi đường dẫn tuyệt đối trong Java
+        String relativePath = currentPath;
+        while (relativePath.startsWith("/")) {
+            relativePath = relativePath.substring(1);
+        }
+
+        // Bóc tách dấu '/' ở đầu argument
+        String cleanArg = argument;
+        while (cleanArg.startsWith("/")) {
+            cleanArg = cleanArg.substring(1);
+        }
+
+        File targetDir = relativePath.isEmpty() ? userHome : new File(userHome, relativePath);
+        return new File(targetDir, cleanArg);
     }
 }
