@@ -7,6 +7,8 @@ public class ClientSession implements Runnable {
     private final Socket clientSocket;
     private final UserManager userManager;
     private final FileManager fileManager;
+    private final ServerGUI gui;
+    private final String clientIp;
 
     private BufferedReader reader;
     private BufferedWriter writer;
@@ -19,10 +21,12 @@ public class ClientSession implements Runnable {
     // Socket phục vụ Kênh dữ liệu
     private ServerSocket passiveServerSocket = null;
 
-    public ClientSession(Socket socket, UserManager userManager, FileManager fileManager) {
+    public ClientSession(Socket socket, UserManager userManager, FileManager fileManager, ServerGUI gui, String clientIp) {
         this.clientSocket = socket;
         this.userManager = userManager;
         this.fileManager = fileManager;
+        this.gui = gui;
+        this.clientIp = clientIp;
     }
 
     @Override
@@ -39,7 +43,7 @@ public class ClientSession implements Runnable {
                 String cmd = parsed.getCommand();
                 String arg = parsed.getArgument();
 
-                System.out.println("[Client " + clientSocket.getInetAddress() + "]: " + line);
+                gui.log("[Client " + clientIp + "]: " + line);
 
                 if ("QUIT".equals(cmd)) {
                     sendResponse(FTPResponse.R_221_GOODBYE);
@@ -49,7 +53,7 @@ public class ClientSession implements Runnable {
                 handleCommand(cmd, arg);
             }
         } catch (IOException e) {
-            System.err.println("[Session Error]: " + e.getMessage());
+            gui.log("Lỗi phiên làm việc [" + clientIp + "]: " + e.getMessage());
         } finally {
             closeSession();
         }
@@ -71,8 +75,14 @@ public class ClientSession implements Runnable {
                     currentUser = pendingUser;
                     isLoggedIn = true;
                     pendingUser = null;
+
+                    // 2. Cập nhật bảng Client và ghi log Đăng nhập thành công
+                    gui.updateClientUser(clientIp, currentUser);
+                    gui.log("Client [" + clientIp + "] đăng nhập thành công tài khoản: " + currentUser);
+
                     sendResponse(FTPResponse.R_230_LOGGED_IN);
                 } else {
+                    gui.log("Client [" + clientIp + "] đăng nhập thất bại.");
                     sendResponse(FTPResponse.R_530_AUTH_FAILED);
                 }
                 break;
@@ -184,6 +194,12 @@ public class ClientSession implements Runnable {
         try {
             if (passiveServerSocket != null && !passiveServerSocket.isClosed()) passiveServerSocket.close();
             if (clientSocket != null && !clientSocket.isClosed()) clientSocket.close();
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+        }finally {
+            if (gui != null) {
+                gui.removeClient(clientIp);
+                gui.log("Client [" + clientIp + "] đã ngắt kết nối.");
+            }
+        }
     }
 }
