@@ -5,7 +5,7 @@ import java.awt.*;
 import java.awt.event.ActionListener;
 
 public class LoginPanel extends JPanel {
-    private final JTextField hostField = new JTextField("172.26.41.34", 10);
+    private final JTextField hostField = new JTextField("172.26.27.121", 10);
     private final JTextField portField = new JTextField("2121", 4);
     private final JTextField userField = new JTextField("user01", 8);
     private final JPasswordField passField = new JPasswordField("123456", 8);

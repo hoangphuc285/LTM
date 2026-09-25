@@ -105,16 +105,20 @@ public class ClientSession implements Runnable {
                     sendResponse(FTPResponse.R_530_NOT_LOGGED_IN);
                     break;
                 }
-                // Mở ServerSocket trên 1 cổng ngẫu nhiên khả dụng (port 0)
                 if (passiveServerSocket != null && !passiveServerSocket.isClosed()) {
                     passiveServerSocket.close();
                 }
-                passiveServerSocket = new ServerSocket(0);
+                passiveServerSocket = new ServerSocket(0); // Lấy cổng ngẫu nhiên
                 int port = passiveServerSocket.getLocalPort();
                 int p1 = port / 256;
                 int p2 = port % 256;
 
-                sendResponse("227 Entering Passive Mode (127,0,0,1," + p1 + "," + p2 + ")");
+                // Lấy IP mạng LAN thực tế của Server mà Client vừa kết nối tới
+                String serverIp = clientSocket.getLocalAddress().getHostAddress();
+                // Chuyển định dạng dấu chấm '.' thành dấu phẩy ',' theo chuẩn RFC 959 (ví dụ: 192.168.1.15 -> 192,168,1,15)
+                String formattedIp = serverIp.replace('.', ',');
+
+                sendResponse("227 Entering Passive Mode (" + formattedIp + "," + p1 + "," + p2 + ")");
                 break;
 
             case "LIST":
