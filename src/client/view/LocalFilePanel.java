@@ -3,19 +3,31 @@ package client.view;
 import client.model.FTPFile;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
+import java.util.Collections;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 public class LocalFilePanel extends JPanel {
     private final JTextField pathField = new JTextField();
     private final JButton btnGo = new JButton("Đi tới");
     private final JButton btnUp = new JButton("⬆ Lên");
+
+    // P6 (Ưu tiên 2): Thanh lọc file nhanh
+    private final JTextField filterField = new JTextField();
+    private final JButton btnClearFilter = new JButton("✖");
 
     private final JTable fileTable;
     private final DefaultTableModel tableModel;
@@ -31,9 +43,12 @@ public class LocalFilePanel extends JPanel {
     private final JMenuItem menuNewFolder = new JMenuItem("📁 Tạo thư mục mới");
     private final JMenuItem menuRename = new JMenuItem("✏ Đổi tên");
     private final JMenuItem menuDelete = new JMenuItem("🗑 Xóa");
+    private final JMenuItem menuViewEdit = new JMenuItem("👁 Xem / Sửa tập tin (View/Edit)");
+    private final JMenuItem menuProperties = new JMenuItem("📋 Thuộc tính (Properties)");
     private final JMenuItem menuRefresh = new JMenuItem("🔄 Làm mới danh sách");
 
     private Consumer<File> onUploadFolderCallback;
+    private BiConsumer<String, Boolean> onDropRemoteItemCallback;
 
     private File currentDir;
     private File customSelectedFile = null;
@@ -61,7 +76,75 @@ public class LocalFilePanel extends JPanel {
         sorter = new TableRowSorter<>(tableModel);
         fileTable.setRowSorter(sorter);
 
-        JPanel topPanel = new JPanel(new BorderLayout(5, 5));
+        // Kéo thả chuột (Drag & Drop)
+        fileTable.setDragEnabled(true);
+        fileTable.setDropMode(DropMode.ON);
+
+        TransferHandler localTransferHandler = new TransferHandler() {
+            @Override
+            public int getSourceActions(JComponent c) {
+                return COPY;
+            }
+
+            @Override
+            protected Transferable createTransferable(JComponent c) {
+                File sel = getSelectedFile();
+                if (sel != null) {
+                    return new Transferable() {
+                        @Override
+                        public DataFlavor[] getTransferDataFlavors() {
+                            return new DataFlavor[]{DataFlavor.javaFileListFlavor, DataFlavor.stringFlavor};
+                        }
+
+                        @Override
+                        public boolean isDataFlavorSupported(DataFlavor flavor) {
+                            return flavor.equals(DataFlavor.javaFileListFlavor) || flavor.equals(DataFlavor.stringFlavor);
+                        }
+
+                        @Override
+                        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+                            if (flavor.equals(DataFlavor.javaFileListFlavor)) {
+                                return Collections.singletonList(sel);
+                            } else if (flavor.equals(DataFlavor.stringFlavor)) {
+                                return sel.getAbsolutePath();
+                            }
+                            throw new UnsupportedFlavorException(flavor);
+                        }
+                    };
+                }
+                return null;
+            }
+
+            @Override
+            public boolean canImport(TransferSupport support) {
+                return support.isDataFlavorSupported(DataFlavor.stringFlavor);
+            }
+
+            @Override
+            public boolean importData(TransferSupport support) {
+                if (!canImport(support)) return false;
+                try {
+                    String data = (String) support.getTransferable().getTransferData(DataFlavor.stringFlavor);
+                    if (data != null && data.startsWith("FTP_REMOTE:")) {
+                        String[] parts = data.split(":", 3);
+                        if (parts.length == 3) {
+                            boolean isDir = "DIR".equals(parts[1]);
+                            String remoteName = parts[2];
+                            if (onDropRemoteItemCallback != null) {
+                                onDropRemoteItemCallback.accept(remoteName, isDir);
+                                return true;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+                return false;
+            }
+        };
+
+        fileTable.setTransferHandler(localTransferHandler);
+        setTransferHandler(localTransferHandler);
+
+        // Thanh điều hướng đường dẫn
         JPanel navPanel = new JPanel(new BorderLayout(3, 3));
         navPanel.add(new JLabel("Đường dẫn: "), BorderLayout.WEST);
         navPanel.add(pathField, BorderLayout.CENTER);
@@ -71,8 +154,18 @@ public class LocalFilePanel extends JPanel {
         btnNavPanel.add(btnUp);
         navPanel.add(btnNavPanel, BorderLayout.EAST);
 
-        topPanel.add(navPanel, BorderLayout.CENTER);
-        add(topPanel, BorderLayout.NORTH);
+        // Thanh lọc file nhanh
+        JPanel filterPanel = new JPanel(new BorderLayout(3, 3));
+        filterPanel.add(new JLabel("🔍 Lọc file: "), BorderLayout.WEST);
+        filterPanel.add(filterField, BorderLayout.CENTER);
+        btnClearFilter.setToolTipText("Xóa bộ lọc");
+        btnClearFilter.setMargin(new Insets(1, 5, 1, 5));
+        filterPanel.add(btnClearFilter, BorderLayout.EAST);
+
+        JPanel topContainer = new JPanel(new GridLayout(2, 1, 2, 3));
+        topContainer.add(navPanel);
+        topContainer.add(filterPanel);
+        add(topContainer, BorderLayout.NORTH);
 
         add(new JScrollPane(fileTable), BorderLayout.CENTER);
 
@@ -89,7 +182,21 @@ public class LocalFilePanel extends JPanel {
         contextMenu.add(menuRename);
         contextMenu.add(menuDelete);
         contextMenu.addSeparator();
+        contextMenu.add(menuViewEdit);
+        contextMenu.add(menuProperties);
+        contextMenu.addSeparator();
         contextMenu.add(menuRefresh);
+
+        // Sự kiện lọc file tự động khi gõ phím
+        filterField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) { applyFilter(); }
+            @Override
+            public void removeUpdate(DocumentEvent e) { applyFilter(); }
+            @Override
+            public void changedUpdate(DocumentEvent e) { applyFilter(); }
+        });
+        btnClearFilter.addActionListener(e -> filterField.setText(""));
 
         ActionListener navigateAction = e -> {
             String inputPath = pathField.getText().trim();
@@ -146,6 +253,8 @@ public class LocalFilePanel extends JPanel {
                     menuOpen.setEnabled(isDir);
                     menuRename.setEnabled(hasSelection);
                     menuDelete.setEnabled(hasSelection);
+                    menuViewEdit.setEnabled(hasSelection && !isDir);
+                    menuProperties.setEnabled(hasSelection);
 
                     contextMenu.show(fileTable, e.getX(), e.getY());
                 }
@@ -209,6 +318,32 @@ public class LocalFilePanel extends JPanel {
             }
         });
 
+        menuViewEdit.addActionListener(e -> {
+            File selected = getSelectedFile();
+            if (selected != null && selected.isFile()) {
+                Frame topFrame = (Frame) SwingUtilities.getWindowAncestor(this);
+                FileEditorDialog dialog = new FileEditorDialog(topFrame, selected, false, selected.getName());
+                dialog.setVisible(true);
+            }
+        });
+
+        menuProperties.addActionListener(e -> {
+            File selected = getSelectedFile();
+            if (selected != null) {
+                Frame topFrame = (Frame) SwingUtilities.getWindowAncestor(this);
+                FilePropertiesDialog dialog = new FilePropertiesDialog(
+                        topFrame,
+                        selected.getName(),
+                        selected.getAbsolutePath(),
+                        selected.length(),
+                        selected.lastModified(),
+                        selected.isDirectory(),
+                        false
+                );
+                dialog.setVisible(true);
+            }
+        });
+
         btnUp.addActionListener(e -> {
             if (currentDir != null && currentDir.getParentFile() != null) {
                 loadDirectory(currentDir.getParentFile());
@@ -237,8 +372,21 @@ public class LocalFilePanel extends JPanel {
         loadDirectory(new File(System.getProperty("user.dir")));
     }
 
+    private void applyFilter() {
+        String text = filterField.getText().trim();
+        if (text.isEmpty()) {
+            sorter.setRowFilter(null);
+        } else {
+            sorter.setRowFilter(RowFilter.regexFilter("(?i)" + Pattern.quote(text), 0));
+        }
+    }
+
     public void setOnUploadFolderCallback(Consumer<File> callback) {
         this.onUploadFolderCallback = callback;
+    }
+
+    public void setOnDropRemoteItemCallback(BiConsumer<String, Boolean> callback) {
+        this.onDropRemoteItemCallback = callback;
     }
 
     private boolean deleteFileOrDir(File file) {
@@ -273,6 +421,7 @@ public class LocalFilePanel extends JPanel {
                 });
             }
         }
+        applyFilter();
     }
 
     private void highlightFileInTable(String fileName) {

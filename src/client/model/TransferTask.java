@@ -15,6 +15,7 @@ public class TransferTask {
     private double speedBytesPerSec;
     private TransferStatus status;
     private String errorMessage;
+    private long resumeOffset = 0; // Offset cho lệnh REST (Resume dở dang)
 
     // Interface lắng nghe sự thay đổi tiến độ / trạng thái
     public interface TransferListener {
@@ -55,6 +56,8 @@ public class TransferTask {
 
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+    public long getResumeOffset() { return resumeOffset; }
+    public void setResumeOffset(long resumeOffset) { this.resumeOffset = resumeOffset; }
     public void setListener(TransferListener listener) { this.listener = listener; }
 
     // Tính phần trăm % hoàn thành

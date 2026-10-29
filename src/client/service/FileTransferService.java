@@ -145,6 +145,15 @@ public class FileTransferService {
         task.setTotalBytes(localFile.length());
 
         setBinaryMode();
+
+        // P10 (Ưu tiên 3): Hỗ trợ khôi phục tải dở dang (Lệnh REST)
+        if (task.getResumeOffset() > 0) {
+            FTPResponse restResp = connection.sendCommand(FTPCommand.REST, String.valueOf(task.getResumeOffset()));
+            if (restResp.getCode() != 350) {
+                task.setResumeOffset(0); // Server không hỗ trợ REST, fallback tải từ đầu
+            }
+        }
+
         Socket dataSocket = openDataSocket();
 
         FTPResponse initiateResponse = connection.sendCommand("STOR", task.getRemotePath());
@@ -157,10 +166,14 @@ public class FileTransferService {
         }
 
         long startTime = System.currentTimeMillis();
-        long totalRead = 0;
+        long totalRead = task.getResumeOffset();
 
         try (FileInputStream in = new FileInputStream(localFile);
              OutputStream out = dataSocket.getOutputStream()) {
+
+            if (task.getResumeOffset() > 0) {
+                in.skip(task.getResumeOffset());
+            }
 
             byte[] buffer = new byte[8192];
             int bytesRead;
@@ -173,7 +186,7 @@ public class FileTransferService {
                 totalRead += bytesRead;
 
                 long elapsedTime = System.currentTimeMillis() - startTime;
-                double speed = elapsedTime > 0 ? (totalRead * 1000.0 / elapsedTime) : 0;
+                double speed = elapsedTime > 0 ? ((totalRead - task.getResumeOffset()) * 1000.0 / elapsedTime) : 0;
                 task.updateProgress(totalRead, speed);
             }
             out.flush();
@@ -201,6 +214,14 @@ public class FileTransferService {
             task.setTotalBytes(remoteSize);
         }
 
+        // P10 (Ưu tiên 3): Hỗ trợ khôi phục tải dở dang (Lệnh REST)
+        if (task.getResumeOffset() > 0) {
+            FTPResponse restResp = connection.sendCommand(FTPCommand.REST, String.valueOf(task.getResumeOffset()));
+            if (restResp.getCode() != 350) {
+                task.setResumeOffset(0);
+            }
+        }
+
         Socket dataSocket = openDataSocket();
 
         FTPResponse initiateResponse = connection.sendCommand("RETR", task.getRemotePath());
@@ -213,10 +234,10 @@ public class FileTransferService {
         }
 
         long startTime = System.currentTimeMillis();
-        long totalRead = 0;
+        long totalRead = task.getResumeOffset();
 
         try (InputStream in = dataSocket.getInputStream();
-             FileOutputStream out = new FileOutputStream(task.getLocalFile())) {
+             FileOutputStream out = new FileOutputStream(task.getLocalFile(), task.getResumeOffset() > 0)) {
 
             byte[] buffer = new byte[8192];
             int bytesRead;
@@ -229,7 +250,7 @@ public class FileTransferService {
                 totalRead += bytesRead;
 
                 long elapsedTime = System.currentTimeMillis() - startTime;
-                double speed = elapsedTime > 0 ? (totalRead * 1000.0 / elapsedTime) : 0;
+                double speed = elapsedTime > 0 ? ((totalRead - task.getResumeOffset()) * 1000.0 / elapsedTime) : 0;
                 task.updateProgress(totalRead, speed);
             }
             out.flush();

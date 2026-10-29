@@ -19,6 +19,7 @@ public class ClientSession implements Runnable {
     private boolean isLoggedIn = false;
     private String currentPath = "/";
     private String renameFromPath = null;
+    private long restOffset = 0; // Offset khôi phục tải dở dang (Lệnh REST)
 
     // Socket phục vụ Kênh dữ liệu
     private ServerSocket passiveServerSocket = null;
@@ -96,6 +97,50 @@ public class ClientSession implements Runnable {
 
             case "TYPE":
                 sendResponse("200 Type set to " + argument);
+                break;
+
+            case "REST":
+                if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
+                try {
+                    restOffset = Long.parseLong(argument.trim());
+                    if (restOffset < 0) restOffset = 0;
+                    sendResponse("350 Restarting at " + restOffset + ". Send STORE or RETRIEVE to initiate transfer.");
+                } catch (Exception e) {
+                    sendResponse("501 Syntax error in parameters or arguments.");
+                }
+                break;
+
+            case "SITE":
+                if (!isLoggedIn) { sendResponse(FTPResponse.R_530_NOT_LOGGED_IN); break; }
+                if (argument != null && argument.toUpperCase().startsWith("CHMOD ")) {
+                    String[] parts = argument.split("\\s+", 3);
+                    if (parts.length >= 3) {
+                        String mode = parts[1];
+                        String targetName = parts[2];
+                        File f = getFileInCurrentDir(targetName);
+                        if (f.exists()) {
+                            try {
+                                int octal = Integer.parseInt(mode, 8);
+                                boolean read = (octal & 0400) != 0;
+                                boolean write = (octal & 0200) != 0;
+                                boolean exec = (octal & 0100) != 0;
+                                f.setReadable(read, false);
+                                f.setWritable(write, false);
+                                f.setExecutable(exec, false);
+                                gui.log("Client [" + clientIp + "] CHMOD " + mode + " trên: " + targetName);
+                                sendResponse("200 Permissions changed on " + targetName + " to " + mode);
+                            } catch (Exception ex) {
+                                sendResponse("200 SITE CHMOD command accepted.");
+                            }
+                        } else {
+                            sendResponse("550 File not found.");
+                        }
+                    } else {
+                        sendResponse("501 Syntax error in SITE CHMOD.");
+                    }
+                } else {
+                    sendResponse("200 SITE command ok.");
+                }
                 break;
 
             case "PWD":
@@ -210,12 +255,18 @@ public class ClientSession implements Runnable {
                 File downloadFile = getFileInCurrentDir(argument);
                 if (!downloadFile.exists() || !downloadFile.isFile()) {
                     sendResponse("550 File not found.");
+                    restOffset = 0;
                     break;
                 }
+                long offset = restOffset;
+                restOffset = 0;
                 sendResponse("150 Opening BINARY mode data connection for " + argument + " (" + downloadFile.length() + " bytes).");
                 try (Socket dataSocket = passiveServerSocket.accept();
                      FileInputStream fis = new FileInputStream(downloadFile);
                      OutputStream os = dataSocket.getOutputStream()) {
+                    if (offset > 0) {
+                        fis.skip(offset);
+                    }
                     byte[] buffer = new byte[8192];
                     int len;
                     while ((len = fis.read(buffer)) != -1) {
@@ -223,8 +274,8 @@ public class ClientSession implements Runnable {
                     }
                     os.flush();
                 }
-                gui.log("Client [" + clientIp + "] đã tải xuống tập tin: " + argument);
-                DBConnection.logTransfer(currentUser, clientIp, "DOWNLOAD", argument, downloadFile.length());
+                gui.log("Client [" + clientIp + "] đã tải xuống tập tin: " + argument + (offset > 0 ? " (tiếp tục từ byte " + offset + ")" : ""));
+                DBConnection.logTransfer(currentUser, clientIp, "DOWNLOAD", argument, downloadFile.length() - offset);
                 sendResponse("226 Transfer complete.");
                 break;
 
@@ -234,10 +285,12 @@ public class ClientSession implements Runnable {
                 if (uploadFile.getParentFile() != null && !uploadFile.getParentFile().exists()) {
                     uploadFile.getParentFile().mkdirs();
                 }
+                long appendOffset = restOffset;
+                restOffset = 0;
                 sendResponse("150 Ok to send data.");
                 try (Socket dataSocket = passiveServerSocket.accept();
                      InputStream is = dataSocket.getInputStream();
-                     FileOutputStream fos = new FileOutputStream(uploadFile)) {
+                     FileOutputStream fos = new FileOutputStream(uploadFile, appendOffset > 0)) {
                     byte[] buffer = new byte[8192];
                     int len;
                     while ((len = is.read(buffer)) != -1) {
@@ -245,7 +298,7 @@ public class ClientSession implements Runnable {
                     }
                     fos.flush();
                 }
-                gui.log("Client [" + clientIp + "] đã tải lên tập tin: " + argument);
+                gui.log("Client [" + clientIp + "] đã tải lên tập tin: " + argument + (appendOffset > 0 ? " (tiếp tục từ byte " + appendOffset + ")" : ""));
                 gui.refreshUserFiles(currentUser);
                 DBConnection.logTransfer(currentUser, clientIp, "UPLOAD", argument, uploadFile.length());
                 sendResponse("226 Transfer complete.");

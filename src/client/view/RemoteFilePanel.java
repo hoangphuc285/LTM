@@ -3,19 +3,32 @@ package client.view;
 import client.model.FTPFile;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.File;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 public class RemoteFilePanel extends JPanel {
     private final JTextField pathField = new JTextField("/");
     private final JButton btnGo = new JButton("Đi tới");
     private final JButton btnUp = new JButton("⬆ Lên");
+    private final JButton btnBookmarks = new JButton("⭐ Dấu trang");
+
+    // P6 (Ưu tiên 2): Thanh lọc file nhanh trên máy chủ
+    private final JTextField filterField = new JTextField();
+    private final JButton btnClearFilter = new JButton("✖");
+    private final JButton btnSearch = new JButton("🔎 Tìm kiếm");
 
     private final JTable fileTable;
     private final DefaultTableModel tableModel;
@@ -33,11 +46,17 @@ public class RemoteFilePanel extends JPanel {
     private final JMenuItem menuNewFolder = new JMenuItem("📁 Tạo thư mục mới");
     private final JMenuItem menuRename = new JMenuItem("✏ Đổi tên");
     private final JMenuItem menuDelete = new JMenuItem("🗑 Xóa");
+    private final JMenuItem menuViewEdit = new JMenuItem("👁 Xem / Sửa tập tin (View/Edit)");
+    private final JMenuItem menuProperties = new JMenuItem("📋 Thuộc tính & Đổi quyền (CHMOD)");
     private final JMenuItem menuRefresh = new JMenuItem("🔄 Làm mới danh sách");
 
     private Consumer<String> onNavigateCallback;
     private Runnable onRefreshCallback;
     private Consumer<String> onDownloadFolderCallback;
+    private Consumer<List<File>> onDropLocalFilesCallback;
+    private Consumer<String> onViewEditCallback;
+    private Consumer<String> onPropertiesCallback;
+    private Runnable onSearchCallback;
 
     public RemoteFilePanel() {
         setLayout(new BorderLayout(5, 5));
@@ -62,18 +81,77 @@ public class RemoteFilePanel extends JPanel {
         sorter = new TableRowSorter<>(tableModel);
         fileTable.setRowSorter(sorter);
 
-        JPanel topPanel = new JPanel(new BorderLayout(5, 5));
+        // Kéo thả chuột (Drag & Drop)
+        fileTable.setDragEnabled(true);
+        fileTable.setDropMode(DropMode.ON);
+
+        TransferHandler remoteTransferHandler = new TransferHandler() {
+            @Override
+            public int getSourceActions(JComponent c) {
+                return COPY;
+            }
+
+            @Override
+            protected Transferable createTransferable(JComponent c) {
+                String selName = getSelectedFileName();
+                if (selName != null) {
+                    boolean isDir = isSelectedDirectory();
+                    String transferStr = "FTP_REMOTE:" + (isDir ? "DIR:" : "FILE:") + selName;
+                    return new StringSelection(transferStr);
+                }
+                return null;
+            }
+
+            @Override
+            public boolean canImport(TransferSupport support) {
+                return support.isDataFlavorSupported(DataFlavor.javaFileListFlavor);
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            public boolean importData(TransferSupport support) {
+                if (!canImport(support)) return false;
+                try {
+                    List<File> files = (List<File>) support.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
+                    if (files != null && !files.isEmpty() && onDropLocalFilesCallback != null) {
+                        onDropLocalFilesCallback.accept(files);
+                        return true;
+                    }
+                } catch (Exception ignored) {}
+                return false;
+            }
+        };
+
+        fileTable.setTransferHandler(remoteTransferHandler);
+        setTransferHandler(remoteTransferHandler);
+
+        // Thanh điều hướng đường dẫn
         JPanel navPanel = new JPanel(new BorderLayout(3, 3));
         navPanel.add(new JLabel("Đường dẫn máy chủ: "), BorderLayout.WEST);
         navPanel.add(pathField, BorderLayout.CENTER);
 
         JPanel btnNavPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        btnNavPanel.add(btnBookmarks);
         btnNavPanel.add(btnGo);
         btnNavPanel.add(btnUp);
         navPanel.add(btnNavPanel, BorderLayout.EAST);
 
-        topPanel.add(navPanel, BorderLayout.CENTER);
-        add(topPanel, BorderLayout.NORTH);
+        // Thanh lọc file nhanh & nút Tìm kiếm
+        JPanel filterPanel = new JPanel(new BorderLayout(3, 3));
+        filterPanel.add(new JLabel("🔍 Lọc file: "), BorderLayout.WEST);
+        filterPanel.add(filterField, BorderLayout.CENTER);
+        btnClearFilter.setToolTipText("Xóa bộ lọc");
+        btnClearFilter.setMargin(new Insets(1, 5, 1, 5));
+
+        JPanel filterEastPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        filterEastPanel.add(btnClearFilter);
+        filterEastPanel.add(btnSearch);
+        filterPanel.add(filterEastPanel, BorderLayout.EAST);
+
+        JPanel topContainer = new JPanel(new GridLayout(2, 1, 2, 3));
+        topContainer.add(navPanel);
+        topContainer.add(filterPanel);
+        add(topContainer, BorderLayout.NORTH);
 
         add(new JScrollPane(fileTable), BorderLayout.CENTER);
 
@@ -92,7 +170,21 @@ public class RemoteFilePanel extends JPanel {
         contextMenu.add(menuRename);
         contextMenu.add(menuDelete);
         contextMenu.addSeparator();
+        contextMenu.add(menuViewEdit);
+        contextMenu.add(menuProperties);
+        contextMenu.addSeparator();
         contextMenu.add(menuRefresh);
+
+        // Sự kiện lọc file tự động khi gõ phím
+        filterField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) { applyFilter(); }
+            @Override
+            public void removeUpdate(DocumentEvent e) { applyFilter(); }
+            @Override
+            public void changedUpdate(DocumentEvent e) { applyFilter(); }
+        });
+        btnClearFilter.addActionListener(e -> filterField.setText(""));
 
         ActionListener navigateAction = e -> {
             String targetPath = pathField.getText().trim();
@@ -128,6 +220,8 @@ public class RemoteFilePanel extends JPanel {
                     menuOpenFolder.setEnabled(isDir);
                     menuRename.setEnabled(hasSelection);
                     menuDelete.setEnabled(hasSelection);
+                    menuViewEdit.setEnabled(hasSelection && !isDir);
+                    menuProperties.setEnabled(hasSelection);
 
                     contextMenu.show(fileTable, e.getX(), e.getY());
                 }
@@ -151,11 +245,66 @@ public class RemoteFilePanel extends JPanel {
                 onNavigateCallback.accept(folder);
             }
         });
+
+        menuViewEdit.addActionListener(e -> {
+            String fileName = getSelectedFileName();
+            if (fileName != null && onViewEditCallback != null) {
+                onViewEditCallback.accept(fileName);
+            }
+        });
+
+        menuProperties.addActionListener(e -> {
+            String fileName = getSelectedFileName();
+            if (fileName != null && onPropertiesCallback != null) {
+                onPropertiesCallback.accept(fileName);
+            }
+        });
+
+        btnSearch.addActionListener(e -> {
+            if (onSearchCallback != null) {
+                onSearchCallback.run();
+            }
+        });
+
+        btnBookmarks.addActionListener(e -> {
+            JPopupMenu popup = new JPopupMenu();
+            JMenuItem addBookmarkItem = new JMenuItem("⭐ Thêm đường dẫn này vào Dấu trang");
+            addBookmarkItem.addActionListener(ev -> {
+                String cur = getCurrentPath();
+                List<String> list = client.service.BookmarkService.loadBookmarks();
+                if (!list.contains(cur)) {
+                    list.add(cur);
+                    client.service.BookmarkService.saveBookmarks(list);
+                    JOptionPane.showMessageDialog(this, "Đã lưu dấu trang: " + cur, "Thông báo", JOptionPane.INFORMATION_MESSAGE);
+                }
+            });
+            popup.add(addBookmarkItem);
+            popup.addSeparator();
+
+            List<String> bookmarks = client.service.BookmarkService.loadBookmarks();
+            for (String b : bookmarks) {
+                JMenuItem item = new JMenuItem("📁 " + b);
+                item.addActionListener(ev -> {
+                    if (onNavigateCallback != null) onNavigateCallback.accept(b);
+                });
+                popup.add(item);
+            }
+            popup.show(btnBookmarks, 0, btnBookmarks.getHeight());
+        });
         menuRefresh.addActionListener(e -> {
             if (onRefreshCallback != null) {
                 onRefreshCallback.run();
             }
         });
+    }
+
+    private void applyFilter() {
+        String text = filterField.getText().trim();
+        if (text.isEmpty()) {
+            sorter.setRowFilter(null);
+        } else {
+            sorter.setRowFilter(RowFilter.regexFilter("(?i)" + Pattern.quote(text), 0));
+        }
     }
 
     public void setOnNavigateCallback(Consumer<String> callback) {
@@ -168,6 +317,22 @@ public class RemoteFilePanel extends JPanel {
 
     public void setOnDownloadFolderCallback(Consumer<String> callback) {
         this.onDownloadFolderCallback = callback;
+    }
+
+    public void setOnDropLocalFilesCallback(Consumer<List<File>> callback) {
+        this.onDropLocalFilesCallback = callback;
+    }
+
+    public void setOnViewEditCallback(Consumer<String> callback) {
+        this.onViewEditCallback = callback;
+    }
+
+    public void setOnPropertiesCallback(Consumer<String> callback) {
+        this.onPropertiesCallback = callback;
+    }
+
+    public void setOnSearchCallback(Runnable callback) {
+        this.onSearchCallback = callback;
     }
 
     public void setCurrentPath(String path) {
@@ -190,6 +355,7 @@ public class RemoteFilePanel extends JPanel {
                 });
             }
         }
+        applyFilter();
     }
 
     public String getSelectedFileName() {

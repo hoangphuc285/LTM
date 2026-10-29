@@ -1,5 +1,7 @@
 package client.view;
 
+import client.model.SiteProfile;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionListener;
@@ -15,6 +17,7 @@ public class LoginPanel extends JPanel {
     private final JPasswordField passField = new JPasswordField("123456", 8);
     private final JCheckBox chkAnonymous = new JCheckBox("Ẩn danh");
     private final JButton btnConnect = new JButton("Kết nối nhanh");
+    private final JButton btnSiteManager = new JButton("📁 Quản lý Site");
 
     private String savedUser = "user01";
     private String savedPass = "123456";
@@ -36,6 +39,7 @@ public class LoginPanel extends JPanel {
         add(passField);
         add(chkAnonymous);
         add(btnConnect);
+        add(btnSiteManager);
 
         ActionListener submitAction = e -> btnConnect.doClick();
         hostField.addActionListener(submitAction);
@@ -74,6 +78,29 @@ public class LoginPanel extends JPanel {
     public String getUsername() { return userField.getText().trim(); }
     public String getPassword() { return new String(passField.getPassword()); }
     public boolean isAnonymous() { return chkAnonymous.isSelected(); }
+    public JButton getBtnSiteManager() { return btnSiteManager; }
+
+    public void applySite(SiteProfile site) {
+        if (site == null) return;
+        hostField.setText(site.getHost());
+        portField.setText(String.valueOf(site.getPort()));
+        chkAnonymous.setSelected(site.isAnonymous());
+        if (site.isAnonymous()) {
+            userField.setText("anonymous");
+            passField.setText("anonymous@example.com");
+            userField.setEnabled(false);
+            passField.setEnabled(false);
+        } else {
+            userField.setText(site.getUsername());
+            passField.setText(site.getPassword());
+            userField.setEnabled(true);
+            passField.setEnabled(true);
+        }
+    }
+
+    public void triggerConnect() {
+        btnConnect.doClick();
+    }
 
     public void setConnectAction(ActionListener action) {
         btnConnect.addActionListener(action);

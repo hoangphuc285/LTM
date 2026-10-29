@@ -21,5 +21,7 @@ public class FTPCommand {
     public static final String DELE = "DELE";
     public static final String RNFR = "RNFR";
     public static final String RNTO = "RNTO";
+    public static final String REST = "REST";
+    public static final String SITE = "SITE";
 }
 
