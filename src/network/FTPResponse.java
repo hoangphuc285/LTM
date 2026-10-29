@@ -21,6 +21,15 @@ public class FTPResponse {
         return code >= 200 && code < 300;
     }
 
+    /**
+     * BUG FIX: Kiểm tra response 1xx (Preliminary) – server báo đã sẵn sàng truyền data.
+     * Client PHẢI nhận được 150/125 trước khi đọc/ghi data socket.
+     * Ví dụ: "150 Opening data connection", "125 Data connection already open".
+     */
+    public boolean isPreliminary() {
+        return code >= 100 && code < 200;
+    }
+
     public boolean isPositiveIntermediate() {
         return code >= 300 && code < 400;
     }

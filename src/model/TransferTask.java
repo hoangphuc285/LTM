@@ -63,6 +63,25 @@ public class TransferTask {
         return (double) transferredBytes / totalBytes * 100.0;
     }
 
+    /**
+     * P12: Ước tính thời gian còn lại (ETA)
+     */
+    public String getETA() {
+        if (status == TransferStatus.COMPLETED) return "00s";
+        if (totalBytes <= 0 || speedBytesPerSec <= 0 || transferredBytes >= totalBytes) {
+            return "-";
+        }
+        long remainingBytes = totalBytes - transferredBytes;
+        long seconds = (long) (remainingBytes / speedBytesPerSec);
+        if (seconds < 60) {
+            return String.format("%02ds", seconds);
+        } else if (seconds < 3600) {
+            return String.format("%02dm:%02ds", seconds / 60, seconds % 60);
+        } else {
+            return String.format("%02dh:%02dm", seconds / 3600, (seconds % 3600) / 60);
+        }
+    }
+
     // Cập nhật số bytes đã truyền và tính tốc độ
     public void updateProgress(long transferred, double speed) {
         this.transferredBytes = transferred;
