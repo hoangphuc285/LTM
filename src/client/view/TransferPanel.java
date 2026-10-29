@@ -8,8 +8,12 @@ import javax.swing.*;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 public class TransferPanel extends JPanel {
     private final JProgressBar overallProgressBar = new JProgressBar(0, 100);
@@ -20,7 +24,14 @@ public class TransferPanel extends JPanel {
 
     private final Map<String, Integer> taskRowMap = new HashMap<>();
 
+    private final JButton btnCancelSelected = new JButton("⛔ Hủy tác vụ");
     private final JButton btnClearCompleted = new JButton("Dọn tác vụ xong");
+
+    private final JPopupMenu contextMenu = new JPopupMenu();
+    private final JMenuItem menuCancel = new JMenuItem("⛔ Hủy tác vụ đang chọn");
+    private final JMenuItem menuRemove = new JMenuItem("🗑 Xóa khỏi danh sách");
+
+    private Consumer<String> onCancelTaskCallback;
 
     public TransferPanel() {
         setLayout(new BorderLayout(5, 5));
@@ -56,6 +67,7 @@ public class TransferPanel extends JPanel {
 
         add(new JScrollPane(queueTable), BorderLayout.CENTER);
 
+        // Panel dưới: Thanh tiến độ tổng quát + Các nút thao tác
         JPanel bottomPanel = new JPanel(new BorderLayout(5, 5));
         JPanel statusInfoPanel = new JPanel(new BorderLayout(5, 2));
         statusInfoPanel.add(statusLabel, BorderLayout.NORTH);
@@ -65,12 +77,79 @@ public class TransferPanel extends JPanel {
         bottomPanel.add(statusInfoPanel, BorderLayout.CENTER);
 
         JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        actionPanel.add(btnCancelSelected);
         actionPanel.add(btnClearCompleted);
         bottomPanel.add(actionPanel, BorderLayout.EAST);
 
         add(bottomPanel, BorderLayout.SOUTH);
 
+        // Context menu cho bảng queue
+        contextMenu.add(menuCancel);
+        contextMenu.add(menuRemove);
+
+        queueTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) { checkPopup(e); }
+            @Override
+            public void mouseReleased(MouseEvent e) { checkPopup(e); }
+
+            private void checkPopup(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    int row = queueTable.rowAtPoint(e.getPoint());
+                    if (row >= 0 && !queueTable.isRowSelected(row)) {
+                        queueTable.setRowSelectionInterval(row, row);
+                    }
+                    boolean hasSel = queueTable.getSelectedRow() != -1;
+                    menuCancel.setEnabled(hasSel);
+                    menuRemove.setEnabled(hasSel);
+                    contextMenu.show(queueTable, e.getX(), e.getY());
+                }
+            }
+        });
+
+        // Xử lý sự kiện Hủy tác vụ
+        ActionListener cancelAction = e -> cancelSelectedTask();
+        btnCancelSelected.addActionListener(cancelAction);
+        menuCancel.addActionListener(cancelAction);
+
+        // Xử lý xóa dòng khỏi danh sách
+        menuRemove.addActionListener(e -> {
+            int row = queueTable.getSelectedRow();
+            if (row != -1) {
+                String taskId = (String) queueTableModel.getValueAt(row, 0);
+                taskRowMap.remove(taskId);
+                queueTableModel.removeRow(row);
+                // Đồng bộ lại chỉ số dòng
+                reindexRows();
+            }
+        });
+
         btnClearCompleted.addActionListener(e -> clearCompletedTasks());
+    }
+
+    public void setOnCancelTaskCallback(Consumer<String> callback) {
+        this.onCancelTaskCallback = callback;
+    }
+
+    private void cancelSelectedTask() {
+        int row = queueTable.getSelectedRow();
+        if (row == -1) {
+            JOptionPane.showMessageDialog(this, "Vui lòng chọn tác vụ cần hủy trong bảng hàng đợi!", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        String taskId = (String) queueTableModel.getValueAt(row, 0);
+        String currentStatus = (String) queueTableModel.getValueAt(row, 8);
+
+        if (currentStatus.contains("Hoàn tất") || currentStatus.contains("Đã hủy")) {
+            JOptionPane.showMessageDialog(this, "Tác vụ này đã kết thúc, không thể hủy!", "Thông báo", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        if (onCancelTaskCallback != null) {
+            onCancelTaskCallback.accept(taskId);
+        }
+        queueTableModel.setValueAt("⛔ Đã hủy", row, 8);
     }
 
     public synchronized void enqueueTask(TransferTask task) {
@@ -132,6 +211,10 @@ public class TransferPanel extends JPanel {
                 queueTableModel.removeRow(i);
             }
         }
+        reindexRows();
+    }
+
+    private void reindexRows() {
         taskRowMap.clear();
         for (int i = 0; i < queueTableModel.getRowCount(); i++) {
             String taskId = (String) queueTableModel.getValueAt(i, 0);
@@ -148,4 +231,3 @@ public class TransferPanel extends JPanel {
 
     public JTable getQueueTable() { return queueTable; }
 }
-

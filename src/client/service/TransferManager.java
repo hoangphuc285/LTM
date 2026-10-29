@@ -59,6 +59,18 @@ public class TransferManager {
         task.setStatus(TransferStatus.CANCELLED);
     }
 
+    public void cancelTaskById(String taskId) {
+        if (taskId == null) return;
+        synchronized (taskList) {
+            for (TransferTask task : taskList) {
+                if (taskId.equals(task.getId())) {
+                    task.setStatus(TransferStatus.CANCELLED);
+                    break;
+                }
+            }
+        }
+    }
+
     public List<TransferTask> getTaskList() {
         return taskList;
     }

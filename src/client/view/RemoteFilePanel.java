@@ -27,7 +27,8 @@ public class RemoteFilePanel extends JPanel {
     private final JButton btnRename = new JButton("Đổi Tên");
 
     private final JPopupMenu contextMenu = new JPopupMenu();
-    private final JMenuItem menuDownload = new JMenuItem("⬇ Tải về máy (Download)");
+    private final JMenuItem menuDownload = new JMenuItem("⬇ Tải về tập tin này (Download)");
+    private final JMenuItem menuDownloadFolder = new JMenuItem("📁 Tải về cả thư mục này (Đệ quy)");
     private final JMenuItem menuOpenFolder = new JMenuItem("📂 Mở thư mục này");
     private final JMenuItem menuNewFolder = new JMenuItem("📁 Tạo thư mục mới");
     private final JMenuItem menuRename = new JMenuItem("✏ Đổi tên");
@@ -36,6 +37,7 @@ public class RemoteFilePanel extends JPanel {
 
     private Consumer<String> onNavigateCallback;
     private Runnable onRefreshCallback;
+    private Consumer<String> onDownloadFolderCallback;
 
     public RemoteFilePanel() {
         setLayout(new BorderLayout(5, 5));
@@ -83,6 +85,7 @@ public class RemoteFilePanel extends JPanel {
         add(bottomPanel, BorderLayout.SOUTH);
 
         contextMenu.add(menuDownload);
+        contextMenu.add(menuDownloadFolder);
         contextMenu.add(menuOpenFolder);
         contextMenu.addSeparator();
         contextMenu.add(menuNewFolder);
@@ -121,6 +124,7 @@ public class RemoteFilePanel extends JPanel {
                     boolean isDir = hasSelection && isSelectedDirectory();
 
                     menuDownload.setEnabled(hasSelection && !isDir);
+                    menuDownloadFolder.setEnabled(hasSelection && isDir);
                     menuOpenFolder.setEnabled(isDir);
                     menuRename.setEnabled(hasSelection);
                     menuDelete.setEnabled(hasSelection);
@@ -131,6 +135,13 @@ public class RemoteFilePanel extends JPanel {
         });
 
         menuDownload.addActionListener(e -> btnDownload.doClick());
+        menuDownloadFolder.addActionListener(e -> {
+            String folder = getSelectedFileName();
+            if (folder != null && onDownloadFolderCallback != null) {
+                onDownloadFolderCallback.accept(folder);
+            }
+        });
+
         menuNewFolder.addActionListener(e -> btnNewFolder.doClick());
         menuRename.addActionListener(e -> btnRename.doClick());
         menuDelete.addActionListener(e -> btnDelete.doClick());
@@ -153,6 +164,10 @@ public class RemoteFilePanel extends JPanel {
 
     public void setOnRefreshCallback(Runnable callback) {
         this.onRefreshCallback = callback;
+    }
+
+    public void setOnDownloadFolderCallback(Consumer<String> callback) {
+        this.onDownloadFolderCallback = callback;
     }
 
     public void setCurrentPath(String path) {
@@ -199,4 +214,3 @@ public class RemoteFilePanel extends JPanel {
     public JButton getBtnDelete() { return btnDelete; }
     public JButton getBtnRename() { return btnRename; }
 }
-

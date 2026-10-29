@@ -14,6 +14,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.io.File;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -33,6 +34,9 @@ public class MainFrame extends JFrame {
 
     private int taskCounter = 1;
     private File currentLocalDownloadDir = new File(System.getProperty("user.dir"));
+
+    // Lưu danh sách file remote hiện tại để kiểm tra trùng lặp
+    private List<FTPFile> currentRemoteFiles = new ArrayList<>();
 
     public MainFrame() {
         setTitle("Java FTP Client (FileZilla Style)");
@@ -59,10 +63,22 @@ public class MainFrame extends JFrame {
 
         add(transferPanel, BorderLayout.SOUTH);
 
+        // Đăng ký callback khi bấm Hủy tác vụ trong bảng Queue
+        transferPanel.setOnCancelTaskCallback(taskId -> {
+            if (transferManager != null) {
+                transferManager.cancelTaskById(taskId);
+                appendLog("Đã yêu cầu hủy tác vụ: " + taskId);
+            }
+        });
+
         loginPanel.setConnectAction(e -> handleConnectDisconnect());
         localFilePanel.getBtnUpload().addActionListener(e -> handleUpload());
         remoteFilePanel.getBtnDownload().addActionListener(e -> handleDownload());
         remoteFilePanel.setOnRefreshCallback(this::refreshRemoteFiles);
+
+        // Đăng ký callback Upload/Download cả thư mục (Đệ quy)
+        localFilePanel.setOnUploadFolderCallback(this::handleUploadFolder);
+        remoteFilePanel.setOnDownloadFolderCallback(this::handleDownloadFolder);
 
         remoteFilePanel.setOnNavigateCallback(targetPath -> {
             if (!isConnected()) return;
@@ -119,6 +135,9 @@ public class MainFrame extends JFrame {
                                 showConnectionError(ex);
                             }
                         }).start();
+                    } else {
+                        // Nhấp đúp vào tập tin -> Download ngay
+                        handleDownload();
                     }
                 }
             }
@@ -264,7 +283,7 @@ public class MainFrame extends JFrame {
                         mainConnection  = conn;
                         transferService = new FileTransferService(mainConnection);
                         directoryService = new DirectoryService(mainConnection);
-                        transferManager  = new TransferManager(2, host, port, user, pass);
+                        transferManager  = new TransferManager(3, host, port, user, pass);
 
                         SwingUtilities.invokeLater(() -> {
                             loginPanel.setConnectedState(true);
@@ -316,6 +335,7 @@ public class MainFrame extends JFrame {
                 }
 
                 List<FTPFile> files = transferService.listFiles();
+                this.currentRemoteFiles = (files != null) ? files : new ArrayList<>();
                 SwingUtilities.invokeLater(() -> remoteFilePanel.updateFileList(files));
             } catch (Exception e) {
                 appendLog("Lỗi khi tải danh sách tệp từ máy chủ: " + e.getMessage());
@@ -328,19 +348,122 @@ public class MainFrame extends JFrame {
         }).start();
     }
 
+    // =========================================================
+    // XỬ LÝ XUNG ĐỘT FILE (Trùng tên: Ghi đè, Tự đổi tên, Bỏ qua)
+    // =========================================================
+    private int promptFileConflict(String fileName, boolean isUpload) {
+        String message = String.format("Tập tin \"%s\" đã tồn tại trên %s!\nBạn muốn xử lý thế nào?",
+                fileName, isUpload ? "Máy chủ" : "Máy cục bộ");
+        Object[] options = {"Ghi đè", "Tự đổi tên", "Bỏ qua", "Hủy"};
+        return JOptionPane.showOptionDialog(
+                this,
+                message,
+                "Xung đột tập tin",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[0]
+        );
+    }
+
+    private File getUniqueLocalFile(File file) {
+        if (!file.exists()) return file;
+        String name = file.getName();
+        String base = name;
+        String ext = "";
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            base = name.substring(0, dot);
+            ext = name.substring(dot);
+        }
+        int count = 1;
+        File parent = file.getParentFile();
+        File newFile;
+        do {
+            newFile = new File(parent, base + "(" + count + ")" + ext);
+            count++;
+        } while (newFile.exists());
+        return newFile;
+    }
+
+    private String getUniqueRemoteName(String name) {
+        boolean exists = currentRemoteFiles.stream().anyMatch(f -> f.getName().equalsIgnoreCase(name));
+        if (!exists) return name;
+
+        String base = name;
+        String ext = "";
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            base = name.substring(0, dot);
+            ext = name.substring(dot);
+        }
+
+        int count = 1;
+        String newName;
+        do {
+            newName = base + "(" + count + ")" + ext;
+            String check = newName;
+            boolean duplicate = currentRemoteFiles.stream().anyMatch(f -> f.getName().equalsIgnoreCase(check));
+            if (!duplicate) break;
+            count++;
+        } while (count < 1000);
+
+        return newName;
+    }
+
+    // =========================================================
+    // UPLOAD TẬP TIN
+    // =========================================================
     private void handleUpload() {
         if (!isConnected()) return;
 
         File selectedFile = localFilePanel.getSelectedFile();
-        if (selectedFile == null || selectedFile.isDirectory()) {
-            JOptionPane.showMessageDialog(this, "Vui lòng chọn 1 file ở bảng Cục bộ để Upload!");
+        if (selectedFile == null) {
+            JOptionPane.showMessageDialog(this, "Vui lòng chọn 1 mục ở bảng Cục bộ để Upload!");
             return;
         }
 
+        // Nếu người dùng chọn thư mục -> Hỏi upload cả thư mục
+        if (selectedFile.isDirectory()) {
+            int confirm = JOptionPane.showConfirmDialog(this,
+                    "Bạn đã chọn thư mục \"" + selectedFile.getName() + "\".\nBạn có muốn tải lên toàn bộ thư mục này không?",
+                    "Tải lên thư mục", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            if (confirm == JOptionPane.YES_OPTION) {
+                handleUploadFolder(selectedFile);
+            }
+            return;
+        }
+
+        String remoteTargetName = selectedFile.getName();
+        boolean alreadyExists = currentRemoteFiles.stream().anyMatch(f -> f.getName().equalsIgnoreCase(selectedFile.getName()));
+
+        if (alreadyExists) {
+            int choice = promptFileConflict(selectedFile.getName(), true);
+            if (choice == 0) {
+                // Ghi đè: giữ nguyên remoteTargetName
+            } else if (choice == 1) {
+                // Tự đổi tên
+                remoteTargetName = getUniqueRemoteName(selectedFile.getName());
+                appendLog("Tự động đổi tên tệp upload thành: " + remoteTargetName);
+            } else if (choice == 2) {
+                // Bỏ qua
+                appendLog("Bỏ qua tải lên tệp: " + selectedFile.getName());
+                return;
+            } else {
+                // Hủy
+                return;
+            }
+        }
+
+        submitUploadTask(selectedFile, remoteTargetName);
+    }
+
+    private void submitUploadTask(File localFile, String remoteName) {
         String taskId = "UP-" + (taskCounter++);
-        TransferTask task = new TransferTask(taskId, TransferTask.Type.UPLOAD, selectedFile, selectedFile.getName());
+        TransferTask task = new TransferTask(taskId, TransferTask.Type.UPLOAD, localFile, remoteName);
         transferPanel.enqueueTask(task);
-        appendLog("Bắt đầu tải lên: " + selectedFile.getName() + " -> " + task.getRemotePath());
+        appendLog("Bắt đầu tải lên: " + localFile.getName() + " -> " + task.getRemotePath());
 
         task.setListener(new TransferTask.TransferListener() {
             @Override
@@ -364,9 +487,6 @@ public class MainFrame extends JFrame {
                     refreshRemoteFiles();
                 } else if (t.getStatus() == TransferStatus.FAILED) {
                     appendLog("Tải lên thất bại: " + t.getLocalFile().getName() + " (Lỗi: " + t.getErrorMessage() + ")");
-                    SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(MainFrame.this,
-                            "Upload thất bại: " + t.getErrorMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE));
                 }
             }
         });
@@ -374,12 +494,63 @@ public class MainFrame extends JFrame {
         transferManager.submitTask(task);
     }
 
+    // =========================================================
+    // UPLOAD CẢ THƯ MỤC (ĐỆ QUY)
+    // =========================================================
+    private void handleUploadFolder(File folder) {
+        if (!isConnected() || folder == null || !folder.isDirectory()) return;
+
+        new Thread(() -> {
+            try {
+                appendLog("Chuẩn bị tải lên toàn bộ thư mục: " + folder.getName());
+                uploadFolderRecursive(folder, folder.getName());
+                SwingUtilities.invokeLater(this::refreshRemoteFiles);
+            } catch (Exception e) {
+                appendLog("Lỗi khi tải lên thư mục: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private void uploadFolderRecursive(File localDir, String remoteRelativePath) {
+        try {
+            // Tạo thư mục trên server
+            directoryService.createDirectory(remoteRelativePath);
+        } catch (Exception ignored) {}
+
+        File[] children = localDir.listFiles();
+        if (children == null) return;
+
+        for (File child : children) {
+            if (child.isHidden()) continue;
+            String childRemotePath = remoteRelativePath + "/" + child.getName();
+            if (child.isDirectory()) {
+                uploadFolderRecursive(child, childRemotePath);
+            } else {
+                submitUploadTask(child, childRemotePath);
+            }
+        }
+    }
+
+    // =========================================================
+    // DOWNLOAD TẬP TIN
+    // =========================================================
     private void handleDownload() {
         if (!isConnected()) return;
 
         String remoteFileName = remoteFilePanel.getSelectedFileName();
-        if (remoteFileName == null || remoteFilePanel.isSelectedDirectory()) {
-            JOptionPane.showMessageDialog(this, "Vui lòng chọn 1 file (không phải thư mục) ở bảng Server để Download!");
+        if (remoteFileName == null) {
+            JOptionPane.showMessageDialog(this, "Vui lòng chọn 1 mục ở bảng Server để Download!");
+            return;
+        }
+
+        // Nếu là thư mục -> Hỏi download cả thư mục
+        if (remoteFilePanel.isSelectedDirectory()) {
+            int confirm = JOptionPane.showConfirmDialog(this,
+                    "Bạn đã chọn thư mục \"" + remoteFileName + "\".\nBạn có muốn tải về toàn bộ thư mục này không?",
+                    "Tải về thư mục", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            if (confirm == JOptionPane.YES_OPTION) {
+                handleDownloadFolder(remoteFileName);
+            }
             return;
         }
 
@@ -395,12 +566,27 @@ public class MainFrame extends JFrame {
         currentLocalDownloadDir = localDest.getParentFile();
 
         if (localDest.exists()) {
-            int overwrite = JOptionPane.showConfirmDialog(this,
-                "File \"" + localDest.getName() + "\" đã tồn tại. Ghi đè?",
-                "Xác nhận ghi đè", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-            if (overwrite != JOptionPane.YES_OPTION) return;
+            int choice = promptFileConflict(localDest.getName(), false);
+            if (choice == 0) {
+                // Ghi đè: giữ nguyên localDest
+            } else if (choice == 1) {
+                // Tự đổi tên
+                localDest = getUniqueLocalFile(localDest);
+                appendLog("Tự động đổi tên tệp tải về thành: " + localDest.getName());
+            } else if (choice == 2) {
+                // Bỏ qua
+                appendLog("Bỏ qua tải về tệp: " + remoteFileName);
+                return;
+            } else {
+                // Hủy
+                return;
+            }
         }
 
+        submitDownloadTask(remoteFileName, localDest);
+    }
+
+    private void submitDownloadTask(String remoteFileName, File localDest) {
         String taskId = "DOWN-" + (taskCounter++);
         TransferTask task = new TransferTask(taskId, TransferTask.Type.DOWNLOAD, localDest, remoteFileName);
         transferPanel.enqueueTask(task);
@@ -428,14 +614,80 @@ public class MainFrame extends JFrame {
                     localFilePanel.loadDirectory(localDest.getParentFile());
                 } else if (t.getStatus() == TransferStatus.FAILED) {
                     appendLog("Tải xuống thất bại: " + remoteFileName + " (Lỗi: " + t.getErrorMessage() + ")");
-                    SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(MainFrame.this,
-                            "Download thất bại: " + t.getErrorMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE));
                 }
             }
         });
 
         transferManager.submitTask(task);
     }
-}
 
+    // =========================================================
+    // DOWNLOAD CẢ THƯ MỤC (ĐỆ QUY)
+    // =========================================================
+    private void handleDownloadFolder(String remoteFolderName) {
+        if (!isConnected() || remoteFolderName == null) return;
+
+        JFileChooser chooser = new JFileChooser(currentLocalDownloadDir);
+        chooser.setDialogTitle("Chọn thư mục lưu về cho: " + remoteFolderName);
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+
+        int result = chooser.showSaveDialog(this);
+        if (result != JFileChooser.APPROVE_OPTION) return;
+
+        File targetParentDir = chooser.getSelectedFile();
+        File localFolder = new File(targetParentDir, remoteFolderName);
+        localFolder.mkdirs();
+
+        new Thread(() -> {
+            FTPConnection helperConn = new FTPConnection();
+            try {
+                helperConn.connect(loginPanel.getHost(), loginPanel.getPort());
+                helperConn.sendCommand(FTPCommand.USER, loginPanel.getUsername());
+                helperConn.sendCommand(FTPCommand.PASS, loginPanel.getPassword());
+
+                // Chuyển vào thư mục cha remote hiện tại
+                String currentRemotePwd = remoteFilePanel.getCurrentPath();
+                if (!"/".equals(currentRemotePwd)) {
+                    helperConn.sendCommand(FTPCommand.CWD, currentRemotePwd);
+                }
+
+                appendLog("Bắt đầu tải về toàn bộ thư mục: " + remoteFolderName);
+                downloadFolderRecursive(helperConn, remoteFolderName, localFolder);
+                appendLog("Đã xếp hàng đợi tải về thư mục: " + remoteFolderName);
+            } catch (Exception e) {
+                appendLog("Lỗi tải về thư mục đệ quy: " + e.getMessage());
+            } finally {
+                helperConn.disconnect();
+            }
+        }).start();
+    }
+
+    private void downloadFolderRecursive(FTPConnection conn, String remoteDirName, File localDir) {
+        try {
+            conn.sendCommand(FTPCommand.CWD, remoteDirName);
+            FileTransferService helperTransfer = new FileTransferService(conn);
+            List<FTPFile> subFiles = helperTransfer.listFiles();
+
+            for (FTPFile item : subFiles) {
+                if (item.isDirectory()) {
+                    File subLocalDir = new File(localDir, item.getName());
+                    subLocalDir.mkdirs();
+                    downloadFolderRecursive(conn, item.getName(), subLocalDir);
+                } else {
+                    File localDest = new File(localDir, item.getName());
+                    if (localDest.exists()) {
+                        localDest = getUniqueLocalFile(localDest);
+                    }
+                    String remoteFilePath = remoteFilePanel.getCurrentPath().equals("/")
+                            ? remoteDirName + "/" + item.getName()
+                            : remoteFilePanel.getCurrentPath() + "/" + remoteDirName + "/" + item.getName();
+                    submitDownloadTask(remoteFilePath, localDest);
+                }
+            }
+
+            conn.sendCommand(FTPCommand.CDUP, null);
+        } catch (Exception e) {
+            appendLog("Lỗi duyệt thư mục remote: " + e.getMessage());
+        }
+    }
+}

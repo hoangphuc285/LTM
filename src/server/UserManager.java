@@ -53,9 +53,14 @@ public class UserManager {
     }
 
     /**
-     * Kiểm tra username có tồn tại không (ưu tiên MySQL, fallback file cấu hình)
+     * Kiểm tra username có tồn tại không (ưu tiên MySQL, fallback file cấu hình, hỗ trợ anonymous)
      */
     public boolean userExists(String username) {
+        if (username == null) return false;
+        if ("anonymous".equalsIgnoreCase(username.trim())) {
+            return true;
+        }
+
         String sql = "SELECT 1 FROM users WHERE username = ?";
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -70,9 +75,14 @@ public class UserManager {
     }
 
     /**
-     * Xác thực thông tin đăng nhập (ưu tiên MySQL, fallback file cấu hình)
+     * Xác thực thông tin đăng nhập (ưu tiên MySQL, fallback file cấu hình, hỗ trợ anonymous)
      */
     public boolean authenticate(String username, String password) {
+        if (username == null) return false;
+        if ("anonymous".equalsIgnoreCase(username.trim())) {
+            return true; // Người dùng ẩn danh được phép truy cập
+        }
+
         String sql = "SELECT 1 FROM users WHERE username = ? AND password = ?";
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {

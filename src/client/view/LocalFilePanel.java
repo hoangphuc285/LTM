@@ -10,6 +10,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
+import java.util.function.Consumer;
 
 public class LocalFilePanel extends JPanel {
     private final JTextField pathField = new JTextField();
@@ -24,12 +25,15 @@ public class LocalFilePanel extends JPanel {
     private final JButton btnUpload = new JButton(" Upload -> ");
 
     private final JPopupMenu contextMenu = new JPopupMenu();
-    private final JMenuItem menuUpload = new JMenuItem("⬆ Tải lên máy chủ (Upload)");
+    private final JMenuItem menuUpload = new JMenuItem("⬆ Tải lên tập tin này (Upload)");
+    private final JMenuItem menuUploadFolder = new JMenuItem("📁 Tải lên cả thư mục này (Đệ quy)");
     private final JMenuItem menuOpen = new JMenuItem("📂 Mở thư mục");
     private final JMenuItem menuNewFolder = new JMenuItem("📁 Tạo thư mục mới");
     private final JMenuItem menuRename = new JMenuItem("✏ Đổi tên");
     private final JMenuItem menuDelete = new JMenuItem("🗑 Xóa");
     private final JMenuItem menuRefresh = new JMenuItem("🔄 Làm mới danh sách");
+
+    private Consumer<File> onUploadFolderCallback;
 
     private File currentDir;
     private File customSelectedFile = null;
@@ -78,6 +82,7 @@ public class LocalFilePanel extends JPanel {
         add(bottomPanel, BorderLayout.SOUTH);
 
         contextMenu.add(menuUpload);
+        contextMenu.add(menuUploadFolder);
         contextMenu.add(menuOpen);
         contextMenu.addSeparator();
         contextMenu.add(menuNewFolder);
@@ -110,6 +115,8 @@ public class LocalFilePanel extends JPanel {
                         if ("Thư mục".equals(tableModel.getValueAt(modelRow, 2))) {
                             String dirName = tableModel.getValueAt(modelRow, 0).toString();
                             loadDirectory(new File(currentDir, dirName));
+                        } else {
+                            btnUpload.doClick();
                         }
                     }
                 }
@@ -135,6 +142,7 @@ public class LocalFilePanel extends JPanel {
                     boolean isDir = hasSelection && isSelectedDirectory();
 
                     menuUpload.setEnabled(hasSelection && !isDir);
+                    menuUploadFolder.setEnabled(hasSelection && isDir);
                     menuOpen.setEnabled(isDir);
                     menuRename.setEnabled(hasSelection);
                     menuDelete.setEnabled(hasSelection);
@@ -145,6 +153,13 @@ public class LocalFilePanel extends JPanel {
         });
 
         menuUpload.addActionListener(e -> btnUpload.doClick());
+        menuUploadFolder.addActionListener(e -> {
+            File selected = getSelectedFile();
+            if (selected != null && selected.isDirectory() && onUploadFolderCallback != null) {
+                onUploadFolderCallback.accept(selected);
+            }
+        });
+
         menuOpen.addActionListener(e -> {
             File selected = getSelectedFile();
             if (selected != null && selected.isDirectory()) {
@@ -202,20 +217,28 @@ public class LocalFilePanel extends JPanel {
 
         btnBrowse.addActionListener(e -> {
             JFileChooser chooser = new JFileChooser(currentDir != null ? currentDir : new File("."));
-            chooser.setDialogTitle("Chọn tập tin trong máy tính");
-            chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            chooser.setDialogTitle("Chọn tập tin hoặc thư mục");
+            chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
 
             int result = chooser.showOpenDialog(this);
             if (result == JFileChooser.APPROVE_OPTION) {
                 customSelectedFile = chooser.getSelectedFile();
-                if (customSelectedFile.getParentFile() != null) {
-                    loadDirectory(customSelectedFile.getParentFile());
+                if (customSelectedFile.isDirectory()) {
+                    loadDirectory(customSelectedFile);
+                } else {
+                    if (customSelectedFile.getParentFile() != null) {
+                        loadDirectory(customSelectedFile.getParentFile());
+                    }
+                    highlightFileInTable(customSelectedFile.getName());
                 }
-                highlightFileInTable(customSelectedFile.getName());
             }
         });
 
         loadDirectory(new File(System.getProperty("user.dir")));
+    }
+
+    public void setOnUploadFolderCallback(Consumer<File> callback) {
+        this.onUploadFolderCallback = callback;
     }
 
     private boolean deleteFileOrDir(File file) {
@@ -287,4 +310,3 @@ public class LocalFilePanel extends JPanel {
     public JButton getBtnUpload() { return btnUpload; }
     public File getCurrentDirectory() { return currentDir; }
 }
-

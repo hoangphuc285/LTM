@@ -13,7 +13,11 @@ public class LoginPanel extends JPanel {
     private final JTextField portField = new JTextField("2121", 4);
     private final JTextField userField = new JTextField("user01", 8);
     private final JPasswordField passField = new JPasswordField("123456", 8);
+    private final JCheckBox chkAnonymous = new JCheckBox("Ẩn danh");
     private final JButton btnConnect = new JButton("Kết nối nhanh");
+
+    private String savedUser = "user01";
+    private String savedPass = "123456";
 
     private static final String CONFIG_DIR = "config";
     private static final String RECENT_FILE = "config/recent_connection.properties";
@@ -30,6 +34,7 @@ public class LoginPanel extends JPanel {
         add(userField);
         add(new JLabel("Mật khẩu:"));
         add(passField);
+        add(chkAnonymous);
         add(btnConnect);
 
         ActionListener submitAction = e -> btnConnect.doClick();
@@ -37,6 +42,23 @@ public class LoginPanel extends JPanel {
         portField.addActionListener(submitAction);
         userField.addActionListener(submitAction);
         passField.addActionListener(submitAction);
+
+        // Sự kiện khi tick/bỏ tick Đăng nhập ẩn danh
+        chkAnonymous.addActionListener(e -> {
+            if (chkAnonymous.isSelected()) {
+                savedUser = userField.getText();
+                savedPass = new String(passField.getPassword());
+                userField.setText("anonymous");
+                passField.setText("anonymous@example.com");
+                userField.setEnabled(false);
+                passField.setEnabled(false);
+            } else {
+                userField.setText(savedUser);
+                passField.setText(savedPass);
+                userField.setEnabled(true);
+                passField.setEnabled(true);
+            }
+        });
 
         loadRecentConnection();
     }
@@ -51,6 +73,7 @@ public class LoginPanel extends JPanel {
     }
     public String getUsername() { return userField.getText().trim(); }
     public String getPassword() { return new String(passField.getPassword()); }
+    public boolean isAnonymous() { return chkAnonymous.isSelected(); }
 
     public void setConnectAction(ActionListener action) {
         btnConnect.addActionListener(action);
@@ -61,8 +84,11 @@ public class LoginPanel extends JPanel {
         btnConnect.setEnabled(true);
         hostField.setEnabled(!connected);
         portField.setEnabled(!connected);
-        userField.setEnabled(!connected);
-        passField.setEnabled(!connected);
+        chkAnonymous.setEnabled(!connected);
+        if (!chkAnonymous.isSelected()) {
+            userField.setEnabled(!connected);
+            passField.setEnabled(!connected);
+        }
 
         if (connected) {
             saveRecentConnection();
@@ -76,6 +102,7 @@ public class LoginPanel extends JPanel {
         portField.setEnabled(!connecting);
         userField.setEnabled(!connecting);
         passField.setEnabled(!connecting);
+        chkAnonymous.setEnabled(!connecting);
     }
 
     public void saveRecentConnection() {
@@ -86,7 +113,9 @@ public class LoginPanel extends JPanel {
             Properties props = new Properties();
             props.setProperty("host", getHost());
             props.setProperty("port", String.valueOf(getPort()));
-            props.setProperty("username", getUsername());
+            if (!chkAnonymous.isSelected()) {
+                props.setProperty("username", getUsername());
+            }
 
             try (FileOutputStream fos = new FileOutputStream(RECENT_FILE)) {
                 props.store(fos, "Recent FTP Connection Settings");
@@ -112,4 +141,3 @@ public class LoginPanel extends JPanel {
         } catch (Exception ignored) {}
     }
 }
-
