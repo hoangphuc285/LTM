@@ -12,19 +12,22 @@ import client.service.TransferManager;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.io.File;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 public class MainFrame extends JFrame {
     private final LoginPanel loginPanel = new LoginPanel();
+    private final ProtocolLogPanel logPanel = new ProtocolLogPanel();
     private final LocalFilePanel localFilePanel = new LocalFilePanel();
     private final RemoteFilePanel remoteFilePanel = new RemoteFilePanel();
     private final TransferPanel transferPanel = new TransferPanel();
 
-    private final JTextArea logArea = new JTextArea();
+    // Thanh trạng thái phía dưới
+    private final JLabel lblConnectionStatus = new JLabel("Trạng thái: Chưa kết nối");
+    private final JLabel lblTransferMode = new JLabel("Chế độ: Bị động (Passive) | Kiểu: Nhị phân (Binary)");
+    private final JToggleButton btnThemeToggle = new JToggleButton("Giao dien Toi");
 
     private FTPConnection mainConnection;
     private FileTransferService transferService;
@@ -34,76 +37,47 @@ public class MainFrame extends JFrame {
 
     private int taskCounter = 1;
     private File currentLocalDownloadDir = new File(System.getProperty("user.dir"));
-
-    // Lưu danh sách file remote hiện tại để kiểm tra trùng lặp
     private List<FTPFile> currentRemoteFiles = new ArrayList<>();
-
-    // P8 (Ưu tiên 2): Giữ kết nối (Keep-alive) bằng lệnh NOOP định kỳ
     private javax.swing.Timer keepAliveTimer;
 
     public MainFrame() {
         setTitle("Java FTP Client (FileZilla Style)");
-        setSize(1050, 720);
+        setSize(1100, 750);
+        setMinimumSize(new Dimension(880, 600));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        setLayout(new BorderLayout(5, 5));
+        setLayout(new BorderLayout(4, 4));
 
-        logArea.setEditable(false);
-        logArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        logArea.setBackground(new Color(250, 250, 250));
-        JScrollPane logScrollPane = new JScrollPane(logArea);
-        logScrollPane.setBorder(BorderFactory.createTitledBorder(" Nhật ký trao đổi giao thức (Message Log) "));
-        logScrollPane.setPreferredSize(new Dimension(0, 110));
-
+        // Phía trên: Quickconnect + Protocol Log
         JPanel northPanel = new JPanel(new BorderLayout(3, 3));
         northPanel.add(loginPanel, BorderLayout.NORTH);
-        northPanel.add(logScrollPane, BorderLayout.CENTER);
+        northPanel.add(logPanel, BorderLayout.CENTER);
         add(northPanel, BorderLayout.NORTH);
 
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, localFilePanel, remoteFilePanel);
-        splitPane.setResizeWeight(0.5);
-        add(splitPane, BorderLayout.CENTER);
+        // Khung Local và Remote
+        JSplitPane splitPanels = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, localFilePanel, remoteFilePanel);
+        splitPanels.setResizeWeight(0.5);
 
-        add(transferPanel, BorderLayout.SOUTH);
+        // Phân tách khung File và khung Queue
+        JSplitPane mainSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, splitPanels, transferPanel);
+        mainSplit.setResizeWeight(0.72);
+        add(mainSplit, BorderLayout.CENTER);
 
-        // Đăng ký callback khi bấm Hủy tác vụ trong bảng Queue
-        transferPanel.setOnCancelTaskCallback(taskId -> {
-            if (transferManager != null) {
-                transferManager.cancelTaskById(taskId);
-                appendLog("Đã yêu cầu hủy tác vụ: " + taskId);
-            }
-        });
+        // Thanh trạng thái dưới cùng
+        JPanel statusBar = new JPanel(new BorderLayout(10, 0));
+        statusBar.setBorder(BorderFactory.createEmptyBorder(4, 10, 4, 10));
+        statusBar.add(lblConnectionStatus, BorderLayout.WEST);
 
-        loginPanel.setConnectAction(e -> handleConnectDisconnect());
+        JPanel statusEast = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 0));
+        statusEast.add(lblTransferMode);
+        statusEast.add(btnThemeToggle);
+        statusBar.add(statusEast, BorderLayout.EAST);
+        add(statusBar, BorderLayout.SOUTH);
 
-        // P7 (Ưu tiên 2): Hộp thoại Quản lý Site (Site Manager)
-        loginPanel.getBtnSiteManager().addActionListener(e -> {
-            SiteManagerDialog dialog = new SiteManagerDialog(this);
-            dialog.setOnConnectCallback(site -> {
-                loginPanel.applySite(site);
-                loginPanel.triggerConnect();
-            });
-            dialog.setVisible(true);
-        });
+        setupGlobalShortcuts();
+        initListeners();
 
-        localFilePanel.getBtnUpload().addActionListener(e -> handleUpload());
-        remoteFilePanel.getBtnDownload().addActionListener(e -> handleDownload());
-        remoteFilePanel.setOnRefreshCallback(this::refreshRemoteFiles);
-
-        // Đăng ký callback Upload/Download cả thư mục (Đệ quy)
-        localFilePanel.setOnUploadFolderCallback(this::handleUploadFolder);
-        remoteFilePanel.setOnDownloadFolderCallback(this::handleDownloadFolder);
-
-        // P9 (Ưu tiên 2): Kéo thả chuột (Drag & Drop) truyền file giữa 2 khung và từ ngoài vào
-        remoteFilePanel.setOnDropLocalFilesCallback(this::handleDropFilesToRemote);
-        localFilePanel.setOnDropRemoteItemCallback(this::handleDropRemoteItemToLocal);
-
-        // Nhóm Ưu tiên 3: Xem/Sửa tệp từ xa, Thuộc tính/CHMOD, Tìm kiếm tệp trên máy chủ
-        remoteFilePanel.setOnViewEditCallback(this::handleRemoteViewEdit);
-        remoteFilePanel.setOnPropertiesCallback(this::handleRemoteProperties);
-        remoteFilePanel.setOnSearchCallback(this::handleOpenSearchDialog);
-
-        // P8 (Ưu tiên 2): Giữ kết nối (Keep-alive) bằng NOOP mỗi 30s
+        // Keep-alive định kỳ bằng lệnh NOOP
         keepAliveTimer = new javax.swing.Timer(30000, e -> {
             if (mainConnection != null && mainConnection.isConnected()) {
                 new Thread(() -> {
@@ -118,6 +92,63 @@ public class MainFrame extends JFrame {
             }
         });
 
+        appendLog("Sẵn sàng. Nhập thông tin và bấm 'Kết nối nhanh' để bắt đầu.");
+    }
+
+    private void setupGlobalShortcuts() {
+        // Ctrl+L: Nhảy con trỏ tới thanh đường dẫn Remote
+        getRootPane().registerKeyboardAction(e -> remoteFilePanel.focusPathField(),
+                KeyStroke.getKeyStroke(KeyEvent.VK_L, KeyEvent.CTRL_DOWN_MASK), JComponent.WHEN_IN_FOCUSED_WINDOW);
+    }
+
+    private void initListeners() {
+        btnThemeToggle.setSelected(AppColors.isDark());
+        btnThemeToggle.setText(AppColors.isDark() ? "Giao dien Sang" : "Giao dien Toi");
+        btnThemeToggle.addActionListener(e -> {
+            boolean dark = btnThemeToggle.isSelected();
+            btnThemeToggle.setText(dark ? "Giao dien Sang" : "Giao dien Toi");
+            ThemeManager.toggle(dark);
+            logPanel.applyTheme();
+            SwingUtilities.updateComponentTreeUI(this);
+        });
+
+        transferPanel.setOnCancelTaskCallback(taskId -> {
+            if (transferManager != null) {
+                transferManager.cancelTaskById(taskId);
+                appendLog("Đã yêu cầu hủy tác vụ: " + taskId);
+            }
+        });
+
+        loginPanel.setConnectAction(e -> handleConnectDisconnect());
+
+        loginPanel.getBtnSiteManager().addActionListener(e -> {
+            SiteManagerDialog dialog = new SiteManagerDialog(this);
+            dialog.setOnConnectCallback(site -> {
+                loginPanel.applySite(site);
+                loginPanel.triggerConnect();
+            });
+            dialog.setVisible(true);
+        });
+
+        localFilePanel.getBtnUpload().addActionListener(e -> handleUpload());
+        remoteFilePanel.getBtnDownload().addActionListener(e -> handleDownload());
+        remoteFilePanel.setOnRefreshCallback(this::refreshRemoteFiles);
+
+        localFilePanel.setOnUploadFolderCallback(this::handleUploadFolder);
+        remoteFilePanel.setOnDownloadFolderCallback(this::handleDownloadFolder);
+
+        remoteFilePanel.setOnDropLocalFilesCallback(this::handleDropFilesToRemote);
+        localFilePanel.setOnDropRemoteItemCallback(this::handleDropRemoteItemToLocal);
+
+        remoteFilePanel.setOnViewEditCallback(this::handleRemoteViewEdit);
+        remoteFilePanel.setOnPropertiesCallback(this::handleRemoteProperties);
+        remoteFilePanel.setOnSearchCallback(this::handleOpenSearchDialog);
+
+        remoteFilePanel.getBtnBookmarks().addActionListener(e -> {
+            JOptionPane.showMessageDialog(this, "Đường dẫn hiện tại: " + remoteFilePanel.getCurrentPath()
+                    + "\nĐã lưu vào danh sách đánh dấu nhanh!", "Dấu trang", JOptionPane.INFORMATION_MESSAGE);
+        });
+
         remoteFilePanel.setOnNavigateCallback(targetPath -> {
             if (!isConnected()) return;
             new Thread(() -> {
@@ -127,8 +158,8 @@ public class MainFrame extends JFrame {
                         refreshRemoteFiles();
                     } else {
                         SwingUtilities.invokeLater(() ->
-                            JOptionPane.showMessageDialog(MainFrame.this,
-                                "Không thể chuyển đến thư mục: " + targetPath, "Lỗi", JOptionPane.ERROR_MESSAGE));
+                                JOptionPane.showMessageDialog(MainFrame.this,
+                                        "Không thể chuyển đến thư mục: " + targetPath, "Lỗi", JOptionPane.ERROR_MESSAGE));
                     }
                 } catch (Exception ex) {
                     showConnectionError(ex);
@@ -145,40 +176,12 @@ public class MainFrame extends JFrame {
                         refreshRemoteFiles();
                     } else {
                         SwingUtilities.invokeLater(() ->
-                            JOptionPane.showMessageDialog(this, "Đã ở thư mục gốc!", "Thông báo", JOptionPane.INFORMATION_MESSAGE));
+                                JOptionPane.showMessageDialog(this, "Đã ở thư mục gốc!", "Thông báo", JOptionPane.INFORMATION_MESSAGE));
                     }
                 } catch (Exception ex) {
                     showConnectionError(ex);
                 }
             }).start();
-        });
-
-        remoteFilePanel.getFileTable().addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mouseClicked(java.awt.event.MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    if (remoteFilePanel.isSelectedDirectory()) {
-                        String folderName = remoteFilePanel.getSelectedFileName();
-                        if (folderName == null) return;
-                        new Thread(() -> {
-                            try {
-                                FTPResponse res = mainConnection.sendCommand("CWD", folderName);
-                                if (res.isSuccess()) {
-                                    refreshRemoteFiles();
-                                } else {
-                                    SwingUtilities.invokeLater(() ->
-                                        JOptionPane.showMessageDialog(MainFrame.this, "Không thể truy cập thư mục!", "Lỗi", JOptionPane.ERROR_MESSAGE));
-                                }
-                            } catch (Exception ex) {
-                                showConnectionError(ex);
-                            }
-                        }).start();
-                    } else {
-                        // Nhấp đúp vào tập tin -> Download ngay
-                        handleDownload();
-                    }
-                }
-            }
         });
 
         remoteFilePanel.getBtnNewFolder().addActionListener(e -> {
@@ -191,7 +194,7 @@ public class MainFrame extends JFrame {
                             refreshRemoteFiles();
                         } else {
                             SwingUtilities.invokeLater(() ->
-                                JOptionPane.showMessageDialog(this, "Tạo thư mục thất bại!", "Lỗi", JOptionPane.ERROR_MESSAGE));
+                                    JOptionPane.showMessageDialog(this, "Tạo thư mục thất bại!", "Lỗi", JOptionPane.ERROR_MESSAGE));
                         }
                     } catch (Exception ex) {
                         showConnectionError(ex);
@@ -203,7 +206,7 @@ public class MainFrame extends JFrame {
         remoteFilePanel.getBtnDelete().addActionListener(e -> {
             if (!isConnected()) return;
             String selected = remoteFilePanel.getSelectedFileName();
-            if (selected == null) {
+            if (selected == null || "..".equals(selected)) {
                 JOptionPane.showMessageDialog(this, "Vui lòng chọn file hoặc thư mục cần xóa!", "Thông báo", JOptionPane.WARNING_MESSAGE);
                 return;
             }
@@ -225,7 +228,7 @@ public class MainFrame extends JFrame {
                             refreshRemoteFiles();
                         } else {
                             SwingUtilities.invokeLater(() ->
-                                JOptionPane.showMessageDialog(this, "Xóa thất bại!", "Lỗi", JOptionPane.ERROR_MESSAGE));
+                                    JOptionPane.showMessageDialog(this, "Xóa thất bại!", "Lỗi", JOptionPane.ERROR_MESSAGE));
                         }
                     } catch (Exception ex) {
                         showConnectionError(ex);
@@ -237,7 +240,7 @@ public class MainFrame extends JFrame {
         remoteFilePanel.getBtnRename().addActionListener(e -> {
             if (!isConnected()) return;
             String selected = remoteFilePanel.getSelectedFileName();
-            if (selected == null) {
+            if (selected == null || "..".equals(selected)) {
                 JOptionPane.showMessageDialog(this, "Vui lòng chọn mục cần đổi tên!");
                 return;
             }
@@ -249,7 +252,7 @@ public class MainFrame extends JFrame {
                             refreshRemoteFiles();
                         } else {
                             SwingUtilities.invokeLater(() ->
-                                JOptionPane.showMessageDialog(this, "Đổi tên thất bại!", "Lỗi", JOptionPane.ERROR_MESSAGE));
+                                    JOptionPane.showMessageDialog(this, "Đổi tên thất bại!", "Lỗi", JOptionPane.ERROR_MESSAGE));
                         }
                     } catch (Exception ex) {
                         showConnectionError(ex);
@@ -257,16 +260,10 @@ public class MainFrame extends JFrame {
                 }).start();
             }
         });
-
-        appendLog("Sẵn sàng. Nhập thông tin và bấm 'Kết nối nhanh' để bắt đầu.");
     }
 
     public void appendLog(String message) {
-        SwingUtilities.invokeLater(() -> {
-            String timestamp = new SimpleDateFormat("HH:mm:ss").format(new Date());
-            logArea.append("[" + timestamp + "] " + message + "\n");
-            logArea.setCaretPosition(logArea.getDocument().getLength());
-        });
+        logPanel.appendLog(message);
     }
 
     private boolean isConnected() {
@@ -279,12 +276,11 @@ public class MainFrame extends JFrame {
 
     private void showConnectionError(Exception ex) {
         appendLog("Lỗi kết nối ngoại lệ: " + ex.getMessage());
-        ex.printStackTrace();
         SwingUtilities.invokeLater(() ->
-            JOptionPane.showMessageDialog(this,
-                "Lỗi kết nối: " + ex.getMessage() + "\nVui lòng kiểm tra lại kết nối.",
-                "Lỗi kết nối",
-                JOptionPane.ERROR_MESSAGE));
+                JOptionPane.showMessageDialog(this,
+                        "Lỗi kết nối: " + ex.getMessage() + "\nVui lòng kiểm tra lại trạng thái Server.",
+                        "Lỗi kết nối",
+                        JOptionPane.ERROR_MESSAGE));
     }
 
     private void handleConnectDisconnect() {
@@ -298,11 +294,13 @@ public class MainFrame extends JFrame {
                     remoteFilePanel.updateFileList(null);
                     remoteFilePanel.setCurrentPath("/");
                     transferPanel.updateProgress(0, "Đã ngắt kết nối.");
+                    lblConnectionStatus.setText("Trạng thái: Chưa kết nối");
+                    lblConnectionStatus.setForeground(Color.DARK_GRAY);
                 });
             }).start();
         } else {
             String host = loginPanel.getHost();
-            int port    = loginPanel.getPort();
+            int port = loginPanel.getPort();
             String user = loginPanel.getUsername();
             String pass = loginPanel.getPassword();
 
@@ -319,16 +317,18 @@ public class MainFrame extends JFrame {
                     FTPResponse passResp = conn.sendCommand(FTPCommand.PASS, pass);
 
                     if (passResp.isSuccess()) {
-                        mainConnection  = conn;
+                        mainConnection = conn;
                         transferService = new FileTransferService(mainConnection);
                         directoryService = new DirectoryService(mainConnection);
-                        transferManager  = new TransferManager(3, host, port, user, pass);
+                        transferManager = new TransferManager(3, host, port, user, pass);
 
                         if (keepAliveTimer != null) keepAliveTimer.start();
 
                         SwingUtilities.invokeLater(() -> {
                             loginPanel.setConnectedState(true);
                             transferPanel.updateProgress(0, "Đã kết nối đến " + host + " với tài khoản " + user);
+                            lblConnectionStatus.setText("Đã kết nối đến: " + host + ":" + port + " (" + user + ")");
+                            lblConnectionStatus.setForeground(new Color(34, 139, 34));
                         });
                         refreshRemoteFiles();
                     } else {
@@ -336,9 +336,11 @@ public class MainFrame extends JFrame {
                         SwingUtilities.invokeLater(() -> {
                             loginPanel.setConnectingState(false);
                             JOptionPane.showMessageDialog(this,
-                                "Đăng nhập thất bại!\nMã lỗi: " + passResp.getCode() + " – " + passResp.getMessage(),
-                                "Xác thực thất bại", JOptionPane.ERROR_MESSAGE);
+                                    "Đăng nhập thất bại!\nMã lỗi: " + passResp.getCode() + " – " + passResp.getMessage(),
+                                    "Xác thực thất bại", JOptionPane.ERROR_MESSAGE);
                             transferPanel.updateProgress(0, "Đăng nhập thất bại.");
+                            lblConnectionStatus.setText("Trạng thái: Đăng nhập thất bại");
+                            lblConnectionStatus.setForeground(Color.RED);
                         });
                     }
                 } catch (Exception ex) {
@@ -346,10 +348,12 @@ public class MainFrame extends JFrame {
                     SwingUtilities.invokeLater(() -> {
                         loginPanel.setConnectingState(false);
                         JOptionPane.showMessageDialog(this,
-                            "Không thể kết nối!\n" + ex.getMessage()
-                            + "\n\nKiểm tra lại:\n  • Host/Port có đúng không?\n  • Server có đang chạy không?",
-                            "Lỗi kết nối", JOptionPane.ERROR_MESSAGE);
+                                "Không thể kết nối!\n" + ex.getMessage()
+                                        + "\n\nKiểm tra lại:\n  • Máy chủ/Cổng có đúng không?\n  • Server có đang hoạt động không?",
+                                "Lỗi kết nối", JOptionPane.ERROR_MESSAGE);
                         transferPanel.updateProgress(0, "Kết nối thất bại.");
+                        lblConnectionStatus.setText("Trạng thái: Lỗi kết nối");
+                        lblConnectionStatus.setForeground(Color.RED);
                     });
                 }
             }).start();
@@ -368,7 +372,7 @@ public class MainFrame extends JFrame {
                 if (pwdRes.isSuccess()) {
                     String msg = pwdRes.getMessage();
                     int firstQuote = msg.indexOf('"');
-                    int lastQuote  = msg.lastIndexOf('"');
+                    int lastQuote = msg.lastIndexOf('"');
                     if (firstQuote != -1 && lastQuote > firstQuote) {
                         String currentPwd = msg.substring(firstQuote + 1, lastQuote);
                         SwingUtilities.invokeLater(() -> remoteFilePanel.setCurrentPath(currentPwd));
@@ -380,32 +384,12 @@ public class MainFrame extends JFrame {
                 SwingUtilities.invokeLater(() -> remoteFilePanel.updateFileList(files));
             } catch (Exception e) {
                 appendLog("Lỗi khi tải danh sách tệp từ máy chủ: " + e.getMessage());
-                e.printStackTrace();
             } finally {
                 synchronized (this) {
                     isRefreshing = false;
                 }
             }
         }).start();
-    }
-
-    // =========================================================
-    // XỬ LÝ XUNG ĐỘT FILE (Trùng tên: Ghi đè, Tiếp tục tải nối REST, Tự đổi tên, Bỏ qua)
-    // =========================================================
-    private int promptFileConflict(String fileName, boolean isUpload) {
-        String message = String.format("Tập tin \"%s\" đã tồn tại trên %s!\nBạn muốn xử lý thế nào?",
-                fileName, isUpload ? "Máy chủ" : "Máy cục bộ");
-        Object[] options = {"Ghi đè", "Tiếp tục tải nối (Resume)", "Tự đổi tên", "Bỏ qua", "Hủy"};
-        return JOptionPane.showOptionDialog(
-                this,
-                message,
-                "Xung đột tập tin (File Conflict)",
-                JOptionPane.DEFAULT_OPTION,
-                JOptionPane.WARNING_MESSAGE,
-                null,
-                options,
-                options[0]
-        );
     }
 
     private File getUniqueLocalFile(File file) {
@@ -453,12 +437,8 @@ public class MainFrame extends JFrame {
         return newName;
     }
 
-    // =========================================================
-    // UPLOAD TẬP TIN & KÉO THẢ SANG MÁY CHỦ
-    // =========================================================
     private void handleUpload() {
         if (!isConnected()) return;
-
         File selectedFile = localFilePanel.getSelectedFile();
         if (selectedFile == null) {
             JOptionPane.showMessageDialog(this, "Vui lòng chọn 1 mục ở bảng Cục bộ để Upload!");
@@ -481,7 +461,6 @@ public class MainFrame extends JFrame {
     private void handleUploadFile(File selectedFile) {
         if (!isConnected() || selectedFile == null) return;
 
-        // Nếu người dùng chọn thư mục -> Upload cả thư mục
         if (selectedFile.isDirectory()) {
             handleUploadFolder(selectedFile);
             return;
@@ -492,28 +471,15 @@ public class MainFrame extends JFrame {
         long resumeOffset = 0;
 
         if (alreadyExists) {
-            int choice = promptFileConflict(selectedFile.getName(), true);
-            if (choice == 0) {
-                // Ghi đè: giữ nguyên remoteTargetName
-            } else if (choice == 1) {
-                // Tiếp tục tải nối (Resume)
-                resumeOffset = currentRemoteFiles.stream()
-                        .filter(f -> f.getName().equalsIgnoreCase(selectedFile.getName()))
-                        .mapToLong(FTPFile::getSize)
-                        .findFirst()
-                        .orElse(0L);
-                appendLog("Kích hoạt Resume tải lên từ byte: " + resumeOffset);
-            } else if (choice == 2) {
-                // Tự đổi tên
-                remoteTargetName = getUniqueRemoteName(selectedFile.getName());
-                appendLog("Tự động đổi tên tệp upload thành: " + remoteTargetName);
-            } else if (choice == 3) {
-                // Bỏ qua
+            FileConflictDialog dlg = new FileConflictDialog(this, selectedFile.getName(), 0, selectedFile.length());
+            dlg.setVisible(true);
+            if (dlg.getSelectedAction() == FileConflictDialog.ConflictAction.CANCEL ||
+                dlg.getSelectedAction() == FileConflictDialog.ConflictAction.SKIP) {
                 appendLog("Bỏ qua tải lên tệp: " + selectedFile.getName());
                 return;
-            } else {
-                // Hủy
-                return;
+            } else if (dlg.getSelectedAction() == FileConflictDialog.ConflictAction.RENAME) {
+                remoteTargetName = getUniqueRemoteName(selectedFile.getName());
+                appendLog("Tự động đổi tên tệp upload thành: " + remoteTargetName);
             }
         }
 
@@ -531,19 +497,19 @@ public class MainFrame extends JFrame {
             task.setResumeOffset(resumeOffset);
         }
         transferPanel.enqueueTask(task);
-        appendLog("Bắt đầu tải lên: " + localFile.getName() + " -> " + task.getRemotePath() + (resumeOffset > 0 ? " (Resume từ byte " + resumeOffset + ")" : ""));
+        appendLog("Bắt đầu tải lên: " + localFile.getName() + " -> " + task.getRemotePath());
 
         task.setListener(new TransferTask.TransferListener() {
             @Override
             public void onProgressUpdate(TransferTask t) {
                 transferPanel.updateTask(t);
                 transferPanel.updateProgress(
-                    (int) t.getProgressPercentage(),
-                    String.format("Đang Upload %s: %.1f%% (%s) [ETA: %s]",
-                        t.getLocalFile().getName(),
-                        t.getProgressPercentage(),
-                        FTPFile.formatSpeed(t.getSpeedBytesPerSec()),
-                        t.getETA()));
+                        (int) t.getProgressPercentage(),
+                        String.format("Đang Upload %s: %.1f%% (%s) [ETA: %s]",
+                                t.getLocalFile().getName(),
+                                t.getProgressPercentage(),
+                                FTPFile.formatSpeed(t.getSpeedBytesPerSec()),
+                                t.getETA()));
             }
 
             @Override
@@ -562,9 +528,6 @@ public class MainFrame extends JFrame {
         transferManager.submitTask(task);
     }
 
-    // =========================================================
-    // UPLOAD CẢ THƯ MỤC (ĐỆ QUY)
-    // =========================================================
     private void handleUploadFolder(File folder) {
         if (!isConnected() || folder == null || !folder.isDirectory()) return;
 
@@ -581,7 +544,6 @@ public class MainFrame extends JFrame {
 
     private void uploadFolderRecursive(File localDir, String remoteRelativePath) {
         try {
-            // Tạo thư mục trên server
             directoryService.createDirectory(remoteRelativePath);
         } catch (Exception ignored) {}
 
@@ -599,19 +561,15 @@ public class MainFrame extends JFrame {
         }
     }
 
-    // =========================================================
-    // DOWNLOAD TẬP TIN
-    // =========================================================
     private void handleDownload() {
         if (!isConnected()) return;
 
         String remoteFileName = remoteFilePanel.getSelectedFileName();
-        if (remoteFileName == null) {
+        if (remoteFileName == null || "..".equals(remoteFileName)) {
             JOptionPane.showMessageDialog(this, "Vui lòng chọn 1 mục ở bảng Server để Download!");
             return;
         }
 
-        // Nếu là thư mục -> Hỏi download cả thư mục
         if (remoteFilePanel.isSelectedDirectory()) {
             int confirm = JOptionPane.showConfirmDialog(this,
                     "Bạn đã chọn thư mục \"" + remoteFileName + "\".\nBạn có muốn tải về toàn bộ thư mục này không?",
@@ -635,24 +593,15 @@ public class MainFrame extends JFrame {
         long resumeOffset = 0;
 
         if (localDest.exists()) {
-            int choice = promptFileConflict(localDest.getName(), false);
-            if (choice == 0) {
-                // Ghi đè: giữ nguyên localDest
-            } else if (choice == 1) {
-                // Tiếp tục tải nối (Resume)
-                resumeOffset = localDest.length();
-                appendLog("Kích hoạt Resume tải xuống từ byte: " + resumeOffset);
-            } else if (choice == 2) {
-                // Tự đổi tên
-                localDest = getUniqueLocalFile(localDest);
-                appendLog("Tự động đổi tên tệp tải về thành: " + localDest.getName());
-            } else if (choice == 3) {
-                // Bỏ qua
+            FileConflictDialog dlg = new FileConflictDialog(this, localDest.getName(), localDest.length(), 0);
+            dlg.setVisible(true);
+            if (dlg.getSelectedAction() == FileConflictDialog.ConflictAction.CANCEL ||
+                dlg.getSelectedAction() == FileConflictDialog.ConflictAction.SKIP) {
                 appendLog("Bỏ qua tải về tệp: " + remoteFileName);
                 return;
-            } else {
-                // Hủy
-                return;
+            } else if (dlg.getSelectedAction() == FileConflictDialog.ConflictAction.RENAME) {
+                localDest = getUniqueLocalFile(localDest);
+                appendLog("Tự động đổi tên tệp tải về thành: " + localDest.getName());
             }
         }
 
@@ -660,7 +609,7 @@ public class MainFrame extends JFrame {
     }
 
     private void handleDropRemoteItemToLocal(String remoteName, boolean isDir) {
-        if (!isConnected() || remoteName == null || remoteName.isEmpty()) return;
+        if (!isConnected() || remoteName == null || remoteName.isEmpty() || "..".equals(remoteName)) return;
 
         File localTargetDir = localFilePanel.getCurrentDirectory();
         if (localTargetDir == null || !localTargetDir.exists()) {
@@ -675,20 +624,12 @@ public class MainFrame extends JFrame {
             File localDest = new File(localTargetDir, remoteName);
             long resumeOffset = 0;
             if (localDest.exists()) {
-                int choice = promptFileConflict(localDest.getName(), false);
-                if (choice == 0) {
-                    // Ghi đè
-                } else if (choice == 1) {
-                    resumeOffset = localDest.length();
-                    appendLog("Kích hoạt Resume tải xuống từ byte: " + resumeOffset);
-                } else if (choice == 2) {
+                FileConflictDialog dlg = new FileConflictDialog(this, localDest.getName(), localDest.length(), 0);
+                dlg.setVisible(true);
+                if (dlg.getSelectedAction() == FileConflictDialog.ConflictAction.CANCEL ||
+                    dlg.getSelectedAction() == FileConflictDialog.ConflictAction.SKIP) return;
+                if (dlg.getSelectedAction() == FileConflictDialog.ConflictAction.RENAME) {
                     localDest = getUniqueLocalFile(localDest);
-                    appendLog("Tự động đổi tên tệp tải về thành: " + localDest.getName());
-                } else if (choice == 3) {
-                    appendLog("Bỏ qua tải về tệp: " + remoteName);
-                    return;
-                } else {
-                    return;
                 }
             }
             submitDownloadTask(remoteName, localDest, resumeOffset);
@@ -706,19 +647,19 @@ public class MainFrame extends JFrame {
             task.setResumeOffset(resumeOffset);
         }
         transferPanel.enqueueTask(task);
-        appendLog("Bắt đầu tải xuống: " + remoteFileName + " -> " + localDest.getAbsolutePath() + (resumeOffset > 0 ? " (Resume từ byte " + resumeOffset + ")" : ""));
+        appendLog("Bắt đầu tải xuống: " + remoteFileName + " -> " + localDest.getAbsolutePath());
 
         task.setListener(new TransferTask.TransferListener() {
             @Override
             public void onProgressUpdate(TransferTask t) {
                 transferPanel.updateTask(t);
                 transferPanel.updateProgress(
-                    (int) t.getProgressPercentage(),
-                    String.format("Đang Download %s: %.1f%% (%s) [ETA: %s]",
-                        remoteFileName,
-                        t.getProgressPercentage(),
-                        FTPFile.formatSpeed(t.getSpeedBytesPerSec()),
-                        t.getETA()));
+                        (int) t.getProgressPercentage(),
+                        String.format("Đang Download %s: %.1f%% (%s) [ETA: %s]",
+                                remoteFileName,
+                                t.getProgressPercentage(),
+                                FTPFile.formatSpeed(t.getSpeedBytesPerSec()),
+                                t.getETA()));
             }
 
             @Override
@@ -737,9 +678,6 @@ public class MainFrame extends JFrame {
         transferManager.submitTask(task);
     }
 
-    // =========================================================
-    // DOWNLOAD CẢ THƯ MỤC (ĐỆ QUY)
-    // =========================================================
     private void handleDownloadFolder(String remoteFolderName) {
         if (!isConnected() || remoteFolderName == null) return;
 
@@ -765,7 +703,6 @@ public class MainFrame extends JFrame {
                 helperConn.sendCommand(FTPCommand.USER, loginPanel.getUsername());
                 helperConn.sendCommand(FTPCommand.PASS, loginPanel.getPassword());
 
-                // Chuyển vào thư mục cha remote hiện tại
                 String currentRemotePwd = remoteFilePanel.getCurrentPath();
                 if (!"/".equals(currentRemotePwd)) {
                     helperConn.sendCommand(FTPCommand.CWD, currentRemotePwd);
@@ -811,9 +748,6 @@ public class MainFrame extends JFrame {
         }
     }
 
-    // =========================================================
-    // XEM / SỬA TẬP TIN TỪ XA (REMOTE VIEW/EDIT)
-    // =========================================================
     private void handleRemoteViewEdit(String remoteFileName) {
         if (!isConnected() || remoteFileName == null) return;
 
@@ -837,7 +771,7 @@ public class MainFrame extends JFrame {
                                         appendLog("Cập nhật tệp thành công lên máy chủ: " + remoteFileName);
                                         refreshRemoteFiles();
                                         SwingUtilities.invokeLater(() ->
-                                            JOptionPane.showMessageDialog(this, "Đã lưu và tải lên máy chủ thành công!", "Thông báo", JOptionPane.INFORMATION_MESSAGE));
+                                                JOptionPane.showMessageDialog(this, "Đã lưu và tải lên máy chủ thành công!", "Thông báo", JOptionPane.INFORMATION_MESSAGE));
                                     } else {
                                         appendLog("Cập nhật tệp thất bại lên máy chủ!");
                                     }
@@ -850,7 +784,7 @@ public class MainFrame extends JFrame {
                     });
                 } else {
                     SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(this, "Không thể tải tệp tạm để xem!", "Lỗi", JOptionPane.ERROR_MESSAGE));
+                            JOptionPane.showMessageDialog(this, "Không thể tải tệp tạm để xem!", "Lỗi", JOptionPane.ERROR_MESSAGE));
                 }
             } catch (Exception ex) {
                 appendLog("Lỗi khi xem/sửa tập tin: " + ex.getMessage());
@@ -858,9 +792,6 @@ public class MainFrame extends JFrame {
         }).start();
     }
 
-    // =========================================================
-    // XEM THUỘC TÍNH & ĐỔI QUYỀN (CHMOD) TRÊN MÁY CHỦ
-    // =========================================================
     private void handleRemoteProperties(String fileName) {
         if (!isConnected() || fileName == null) return;
 
@@ -897,9 +828,6 @@ public class MainFrame extends JFrame {
         dialog.setVisible(true);
     }
 
-    // =========================================================
-    // TÌM KIẾM TẬP TIN TRÊN MÁY CHỦ (REMOTE SEARCH)
-    // =========================================================
     private void handleOpenSearchDialog() {
         if (!isConnected()) return;
 

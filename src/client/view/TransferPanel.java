@@ -17,88 +17,85 @@ import java.util.function.Consumer;
 
 public class TransferPanel extends JPanel {
     private final JProgressBar overallProgressBar = new JProgressBar(0, 100);
-    private final JLabel statusLabel = new JLabel("Hàng đợi truyền file: Sẵn sàng.");
+    private final JLabel statusLabel = new JLabel("Hang doi truyen tap tin: San sang.");
 
     private final DefaultTableModel queueTableModel;
     private final JTable queueTable;
-
     private final Map<String, Integer> taskRowMap = new HashMap<>();
 
-    private final JButton btnCancelSelected = new JButton("⛔ Hủy tác vụ");
-    private final JButton btnClearCompleted = new JButton("Dọn tác vụ xong");
+    private final JButton btnPauseResume    = new JButton("Tam dung / Tiep tuc");
+    private final JButton btnRetry          = new JButton("Thu lai");
+    private final JButton btnCancelSelected = new JButton("Huy tac vu");
+    private final JButton btnClearCompleted = new JButton("Don tac vu xong");
 
-    private final JPopupMenu contextMenu = new JPopupMenu();
-    private final JMenuItem menuCancel = new JMenuItem("⛔ Hủy tác vụ đang chọn");
-    private final JMenuItem menuRemove = new JMenuItem("🗑 Xóa khỏi danh sách");
+    private final JPopupMenu contextMenu    = new JPopupMenu();
+    private final JMenuItem menuCancel      = new JMenuItem("Huy tac vu dang chon");
+    private final JMenuItem menuRemove      = new JMenuItem("Xoa khoi danh sach");
 
     private Consumer<String> onCancelTaskCallback;
 
     public TransferPanel() {
         setLayout(new BorderLayout(5, 5));
-        setBorder(BorderFactory.createTitledBorder(" Hàng đợi truyền tập tin (Transfer Queue) "));
-        setPreferredSize(new Dimension(0, 160));
+        setBorder(BorderFactory.createTitledBorder(" Hang doi truyen tap tin (Transfer Queue) "));
+        setPreferredSize(new Dimension(0, 175));
 
-        String[] columns = {"Mã", "Loại", "Tập tin", "Máy chủ", "Kích thước", "Tiến độ", "Tốc độ", "Còn lại (ETA)", "Trạng thái"};
+        String[] columns = {"Ma", "Loai", "Tap tin", "Duong dan tu xa",
+                "Kich thuoc", "Tien do", "Toc do", "ETA", "Trang thai"};
         queueTableModel = new DefaultTableModel(columns, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) { return false; }
+            @Override public boolean isCellEditable(int r, int c) { return false; }
         };
 
         queueTable = new JTable(queueTableModel);
         queueTable.setFillsViewportHeight(true);
 
-        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
-        centerRenderer.setHorizontalAlignment(JLabel.CENTER);
-        queueTable.getColumnModel().getColumn(0).setPreferredWidth(55);
+        queueTable.getColumnModel().getColumn(0).setPreferredWidth(60);
         queueTable.getColumnModel().getColumn(1).setPreferredWidth(75);
-        queueTable.getColumnModel().getColumn(1).setCellRenderer(centerRenderer);
-        queueTable.getColumnModel().getColumn(2).setPreferredWidth(150);
-        queueTable.getColumnModel().getColumn(3).setPreferredWidth(130);
+        queueTable.getColumnModel().getColumn(2).setPreferredWidth(160);
+        queueTable.getColumnModel().getColumn(3).setPreferredWidth(140);
         queueTable.getColumnModel().getColumn(4).setPreferredWidth(80);
-        queueTable.getColumnModel().getColumn(4).setCellRenderer(centerRenderer);
-        queueTable.getColumnModel().getColumn(5).setPreferredWidth(75);
-        queueTable.getColumnModel().getColumn(5).setCellRenderer(centerRenderer);
+        queueTable.getColumnModel().getColumn(5).setPreferredWidth(90);
         queueTable.getColumnModel().getColumn(6).setPreferredWidth(85);
-        queueTable.getColumnModel().getColumn(6).setCellRenderer(centerRenderer);
-        queueTable.getColumnModel().getColumn(7).setPreferredWidth(90);
-        queueTable.getColumnModel().getColumn(7).setCellRenderer(centerRenderer);
-        queueTable.getColumnModel().getColumn(8).setPreferredWidth(95);
-        queueTable.getColumnModel().getColumn(8).setCellRenderer(centerRenderer);
+        queueTable.getColumnModel().getColumn(7).setPreferredWidth(70);
+        queueTable.getColumnModel().getColumn(8).setPreferredWidth(100);
+
+        // Dang ky Progress Bar Renderer cho cot 5 (Tien do)
+        queueTable.getColumnModel().getColumn(5).setCellRenderer(new ProgressBarRenderer());
+
+        // Dang ky Status Renderer to mau cho cot 8 (Trang thai)
+        queueTable.getColumnModel().getColumn(8).setCellRenderer(new StatusColorRenderer());
 
         add(new JScrollPane(queueTable), BorderLayout.CENTER);
 
-        // Panel dưới: Thanh tiến độ tổng quát + Các nút thao tác
-        JPanel bottomPanel = new JPanel(new BorderLayout(5, 5));
-        JPanel statusInfoPanel = new JPanel(new BorderLayout(5, 2));
-        statusInfoPanel.add(statusLabel, BorderLayout.NORTH);
+        // Panel duoi: Thanh tien do tong quat + Nut dieu khien
+        JPanel bottomPanel = new JPanel(new BorderLayout(8, 4));
+        JPanel statusInfo = new JPanel(new BorderLayout(4, 2));
+        statusInfo.add(statusLabel, BorderLayout.NORTH);
         overallProgressBar.setStringPainted(true);
-        statusInfoPanel.add(overallProgressBar, BorderLayout.CENTER);
+        overallProgressBar.setForeground(AppColors.accent());
+        statusInfo.add(overallProgressBar, BorderLayout.CENTER);
 
-        bottomPanel.add(statusInfoPanel, BorderLayout.CENTER);
+        JPanel btnActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 2));
+        btnActions.add(btnPauseResume);
+        btnActions.add(btnRetry);
+        btnActions.add(btnCancelSelected);
+        btnActions.add(btnClearCompleted);
 
-        JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        actionPanel.add(btnCancelSelected);
-        actionPanel.add(btnClearCompleted);
-        bottomPanel.add(actionPanel, BorderLayout.EAST);
-
+        bottomPanel.add(statusInfo, BorderLayout.CENTER);
+        bottomPanel.add(btnActions, BorderLayout.EAST);
         add(bottomPanel, BorderLayout.SOUTH);
 
-        // Context menu cho bảng queue
+        // Context menu
         contextMenu.add(menuCancel);
         contextMenu.add(menuRemove);
 
         queueTable.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) { checkPopup(e); }
-            @Override
-            public void mouseReleased(MouseEvent e) { checkPopup(e); }
+            @Override public void mousePressed(MouseEvent e)  { checkPopup(e); }
+            @Override public void mouseReleased(MouseEvent e) { checkPopup(e); }
 
             private void checkPopup(MouseEvent e) {
                 if (e.isPopupTrigger()) {
-                    int row = queueTable.rowAtPoint(e.getPoint());
-                    if (row >= 0 && !queueTable.isRowSelected(row)) {
-                        queueTable.setRowSelectionInterval(row, row);
-                    }
+                    int r = queueTable.rowAtPoint(e.getPoint());
+                    if (r >= 0 && !queueTable.isRowSelected(r)) queueTable.setRowSelectionInterval(r, r);
                     boolean hasSel = queueTable.getSelectedRow() != -1;
                     menuCancel.setEnabled(hasSel);
                     menuRemove.setEnabled(hasSel);
@@ -107,127 +104,210 @@ public class TransferPanel extends JPanel {
             }
         });
 
-        // Xử lý sự kiện Hủy tác vụ
         ActionListener cancelAction = e -> cancelSelectedTask();
         btnCancelSelected.addActionListener(cancelAction);
         menuCancel.addActionListener(cancelAction);
 
-        // Xử lý xóa dòng khỏi danh sách
         menuRemove.addActionListener(e -> {
-            int row = queueTable.getSelectedRow();
-            if (row != -1) {
-                String taskId = (String) queueTableModel.getValueAt(row, 0);
-                taskRowMap.remove(taskId);
-                queueTableModel.removeRow(row);
-                // Đồng bộ lại chỉ số dòng
+            int r = queueTable.getSelectedRow();
+            if (r != -1) {
+                String id = (String) queueTableModel.getValueAt(r, 0);
+                taskRowMap.remove(id);
+                queueTableModel.removeRow(r);
                 reindexRows();
+                updateOverallProgress();
             }
         });
 
         btnClearCompleted.addActionListener(e -> clearCompletedTasks());
     }
 
-    public void setOnCancelTaskCallback(Consumer<String> callback) {
-        this.onCancelTaskCallback = callback;
+    // ------------------------------------------------------------------
+    // Renderer: Thanh tien trinh theo tung dong
+    // ------------------------------------------------------------------
+    private static class ProgressBarRenderer extends JProgressBar
+            implements javax.swing.table.TableCellRenderer {
+
+        public ProgressBarRenderer() {
+            super(0, 100);
+            setStringPainted(true);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                                                       boolean isSelected, boolean hasFocus,
+                                                       int r, int c) {
+            int progress = 0;
+            if (value instanceof Number n) {
+                progress = n.intValue();
+            } else if (value instanceof String s) {
+                try { progress = (int) Double.parseDouble(s.replace("%", "").trim()); }
+                catch (Exception ignored) {}
+            }
+            setValue(progress);
+            setString(progress + "%");
+
+            // Lay trang thai tu cot 8 cung hang de to mau phu hop
+            String statusStr = "";
+            try {
+                Object sv = table.getModel().getValueAt(r, 8);
+                if (sv != null) statusStr = sv.toString();
+            } catch (Exception ignored) {}
+
+            boolean hasError = statusStr.contains("Loi") || statusStr.contains("loi")
+                    || statusStr.contains("that bai");
+            setForeground(StatusColors.forProgressBar(progress, hasError));
+            return this;
+        }
     }
 
-    private void cancelSelectedTask() {
-        int row = queueTable.getSelectedRow();
-        if (row == -1) {
-            JOptionPane.showMessageDialog(this, "Vui lòng chọn tác vụ cần hủy trong bảng hàng đợi!", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
-            return;
+    // ------------------------------------------------------------------
+    // Renderer: To mau o Trang thai
+    // ------------------------------------------------------------------
+    private static class StatusColorRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                                                       boolean isSelected, boolean hasFocus,
+                                                       int r, int c) {
+            JLabel lbl = (JLabel) super.getTableCellRendererComponent(
+                    table, value, isSelected, hasFocus, r, c);
+            lbl.setHorizontalAlignment(SwingConstants.CENTER);
+            if (!isSelected && value != null) {
+                String s = value.toString();
+                // Anh xa tu text hien thi sang TransferStatus
+                if (s.contains("Hoan tat") || s.contains("hoan tat"))
+                    lbl.setForeground(AppColors.success());
+                else if (s.contains("Dang truyen") || s.contains("Dang"))
+                    lbl.setForeground(AppColors.accent());
+                else if (s.contains("Loi") || s.contains("That bai") || s.contains("loi"))
+                    lbl.setForeground(AppColors.error());
+                else if (s.contains("Da huy") || s.contains("Tam dung") || s.contains("Canh bao"))
+                    lbl.setForeground(AppColors.warning());
+                else
+                    lbl.setForeground(AppColors.textSecondary());
+            }
+            return lbl;
         }
-
-        String taskId = (String) queueTableModel.getValueAt(row, 0);
-        String currentStatus = (String) queueTableModel.getValueAt(row, 8);
-
-        if (currentStatus.contains("Hoàn tất") || currentStatus.contains("Đã hủy")) {
-            JOptionPane.showMessageDialog(this, "Tác vụ này đã kết thúc, không thể hủy!", "Thông báo", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-
-        if (onCancelTaskCallback != null) {
-            onCancelTaskCallback.accept(taskId);
-        }
-        queueTableModel.setValueAt("⛔ Đã hủy", row, 8);
     }
 
-    public synchronized void enqueueTask(TransferTask task) {
+    // ------------------------------------------------------------------
+    // API cong khai
+    // ------------------------------------------------------------------
+
+    public synchronized void enqueueTask(TransferTask task) { addTask(task); }
+
+    public synchronized void addTask(TransferTask task) {
         SwingUtilities.invokeLater(() -> {
-            String typeStr = task.getType() == TransferTask.Type.UPLOAD ? "⬆ Upload" : "⬇ Download";
-            String sizeStr = task.getTotalBytes() > 0 ? FTPFile.formatSize(task.getTotalBytes()) : "-";
+            int row = queueTableModel.getRowCount();
+            taskRowMap.put(task.getId(), row);
 
-            int rowIndex = queueTableModel.getRowCount();
             queueTableModel.addRow(new Object[]{
                     task.getId(),
-                    typeStr,
+                    task.getType() == TransferTask.Type.UPLOAD ? "Upload" : "Download",
                     task.getLocalFile().getName(),
                     task.getRemotePath(),
-                    sizeStr,
-                    String.format("%.1f%%", task.getProgressPercentage()),
+                    task.getTotalBytes() > 0 ? FTPFile.formatSize(task.getTotalBytes()) : "-",
+                    (int) task.getProgressPercentage(),
                     "-",
                     task.getETA(),
-                    getStatusText(task.getStatus())
+                    formatStatus(task.getStatus())
             });
-
-            taskRowMap.put(task.getId(), rowIndex);
+            updateOverallProgress();
         });
     }
 
-    public synchronized void updateTask(TransferTask task) {
+    public synchronized void updateTask(TransferTask task) { updateTaskProgress(task); }
+
+    public synchronized void updateTaskProgress(TransferTask task) {
         SwingUtilities.invokeLater(() -> {
             Integer row = taskRowMap.get(task.getId());
             if (row != null && row >= 0 && row < queueTableModel.getRowCount()) {
-                if (task.getTotalBytes() > 0) {
+                if (task.getTotalBytes() > 0)
                     queueTableModel.setValueAt(FTPFile.formatSize(task.getTotalBytes()), row, 4);
-                }
-                queueTableModel.setValueAt(String.format("%.1f%%", task.getProgressPercentage()), row, 5);
+                queueTableModel.setValueAt((int) task.getProgressPercentage(), row, 5);
                 queueTableModel.setValueAt(FTPFile.formatSpeed(task.getSpeedBytesPerSec()), row, 6);
                 queueTableModel.setValueAt(task.getETA(), row, 7);
-                queueTableModel.setValueAt(getStatusText(task.getStatus()), row, 8);
+                queueTableModel.setValueAt(formatStatus(task.getStatus()), row, 8);
             }
+            updateOverallProgress();
         });
     }
 
-    private String getStatusText(TransferStatus status) {
-        if (status == null) return "Chờ xử lý";
-        switch (status) {
-            case WAITING:     return "⏳ Đang chờ";
-            case IN_PROGRESS: return "🔄 Đang truyền";
-            case COMPLETED:   return "✅ Hoàn tất";
-            case FAILED:      return "❌ Thất bại";
-            case CANCELLED:   return "⛔ Đã hủy";
-            case PAUSED:      return "⏸ Tạm dừng";
-            default:          return status.toString();
-        }
-    }
-
-    private synchronized void clearCompletedTasks() {
-        for (int i = queueTableModel.getRowCount() - 1; i >= 0; i--) {
-            String status = (String) queueTableModel.getValueAt(i, 8);
-            if (status != null && (status.contains("Hoàn tất") || status.contains("Thất bại") || status.contains("Đã hủy"))) {
-                String taskId = (String) queueTableModel.getValueAt(i, 0);
-                taskRowMap.remove(taskId);
-                queueTableModel.removeRow(i);
-            }
-        }
-        reindexRows();
-    }
-
-    private void reindexRows() {
-        taskRowMap.clear();
-        for (int i = 0; i < queueTableModel.getRowCount(); i++) {
-            String taskId = (String) queueTableModel.getValueAt(i, 0);
-            taskRowMap.put(taskId, i);
-        }
+    private String formatStatus(TransferStatus s) {
+        if (s == null) return "Dang cho";
+        return switch (s) {
+            case IN_PROGRESS -> "Dang truyen...";
+            case COMPLETED   -> "Hoan tat";
+            case FAILED      -> "Loi";
+            case CANCELLED   -> "Da huy";
+            case PAUSED      -> "Tam dung";
+            default          -> "Dang cho";
+        };
     }
 
     public void updateProgress(int percent, String statusText) {
         SwingUtilities.invokeLater(() -> {
             overallProgressBar.setValue(percent);
+            overallProgressBar.setForeground(StatusColors.forProgressBar(percent, false));
             statusLabel.setText(statusText);
         });
     }
 
+    private void updateOverallProgress() {
+        int total = queueTableModel.getRowCount();
+        if (total == 0) {
+            overallProgressBar.setValue(0);
+            statusLabel.setText("Hang doi truyen tap tin: San sang.");
+            return;
+        }
+        int sum = 0, completed = 0;
+        for (int i = 0; i < total; i++) {
+            Object pVal = queueTableModel.getValueAt(i, 5);
+            if (pVal instanceof Number n) sum += n.intValue();
+            String st = (String) queueTableModel.getValueAt(i, 8);
+            if (st != null && st.contains("Hoan tat")) completed++;
+        }
+        int avg = sum / total;
+        overallProgressBar.setValue(avg);
+        overallProgressBar.setForeground(StatusColors.forProgressBar(avg, false));
+        statusLabel.setText(String.format("Tong tien do: %d%% | Hoan thanh %d/%d tac vu", avg, completed, total));
+    }
+
+    public synchronized void clearCompletedTasks() {
+        for (int i = queueTableModel.getRowCount() - 1; i >= 0; i--) {
+            String st = (String) queueTableModel.getValueAt(i, 8);
+            if (st != null && (st.contains("Hoan tat") || st.contains("Da huy") || st.contains("Loi"))) {
+                String id = (String) queueTableModel.getValueAt(i, 0);
+                taskRowMap.remove(id);
+                queueTableModel.removeRow(i);
+            }
+        }
+        reindexRows();
+        updateOverallProgress();
+    }
+
+    private void reindexRows() {
+        taskRowMap.clear();
+        for (int i = 0; i < queueTableModel.getRowCount(); i++) {
+            taskRowMap.put((String) queueTableModel.getValueAt(i, 0), i);
+        }
+    }
+
+    private void cancelSelectedTask() {
+        int r = queueTable.getSelectedRow();
+        if (r == -1) {
+            JOptionPane.showMessageDialog(this, "Vui long chon tac vu can huy!", "Thong bao", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        String id = (String) queueTableModel.getValueAt(r, 0);
+        String st = (String) queueTableModel.getValueAt(r, 8);
+        if (st.contains("Hoan tat") || st.contains("Da huy")) {
+            JOptionPane.showMessageDialog(this, "Tac vu nay da ket thuc, khong the huy!", "Thong bao", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        if (onCancelTaskCallback != null) onCancelTaskCallback.accept(id);
+    }
+
+    public void setOnCancelTaskCallback(Consumer<String> cb) { this.onCancelTaskCallback = cb; }
     public JTable getQueueTable() { return queueTable; }
 }

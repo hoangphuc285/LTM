@@ -8,30 +8,40 @@ public class FTPFile {
     private final long size;
     private final boolean isDirectory;
     private final long lastModified; // epoch milliseconds
+    private String permissions = "rwxr-xr-x";
+    private String owner = "user01";
 
     public FTPFile(String name, long size, boolean isDirectory) {
         this(name, size, isDirectory, 0L);
     }
 
     public FTPFile(String name, long size, boolean isDirectory, long lastModified) {
+        this(name, size, isDirectory, lastModified, isDirectory ? "drwxr-xr-x" : "-rw-r--r--", "user01");
+    }
+
+    public FTPFile(String name, long size, boolean isDirectory, long lastModified, String permissions, String owner) {
         this.name = name;
         this.size = size;
         this.isDirectory = isDirectory;
         this.lastModified = lastModified;
+        this.permissions = permissions != null ? permissions : (isDirectory ? "drwxr-xr-x" : "-rw-r--r--");
+        this.owner = owner != null ? owner : "user01";
     }
 
     public String getName()        { return name; }
     public long getSize()          { return size; }
     public boolean isDirectory()   { return isDirectory; }
     public long getLastModified()  { return lastModified; }
+    public String getPermissions() { return permissions; }
+    public String getOwner()       { return owner; }
 
     /**
      * Format kích thước file theo đơn vị dễ đọc (B / KB / MB / GB).
      */
     public static String formatSize(long bytes) {
-        if (bytes < 0)            return "-";
-        if (bytes < 1_024)        return bytes + " B";
-        if (bytes < 1_048_576)    return String.format("%.1f KB", bytes / 1_024.0);
+        if (bytes < 0) return "-";
+        if (bytes < 1_024) return bytes + " B";
+        if (bytes < 1_048_576) return String.format("%.1f KB", bytes / 1_024.0);
         if (bytes < 1_073_741_824) return String.format("%.1f MB", bytes / 1_048_576.0);
         return String.format("%.2f GB", bytes / 1_073_741_824.0);
     }
@@ -40,9 +50,9 @@ public class FTPFile {
      * Format tốc độ truyền (B/s / KB/s / MB/s).
      */
     public static String formatSpeed(double bytesPerSec) {
-        if (bytesPerSec <= 0)         return "-";
-        if (bytesPerSec < 1_024)      return String.format("%.0f B/s", bytesPerSec);
-        if (bytesPerSec < 1_048_576)  return String.format("%.1f KB/s", bytesPerSec / 1_024.0);
+        if (bytesPerSec <= 0) return "-";
+        if (bytesPerSec < 1_024) return String.format("%.0f B/s", bytesPerSec);
+        if (bytesPerSec < 1_048_576) return String.format("%.1f KB/s", bytesPerSec / 1_024.0);
         return String.format("%.1f MB/s", bytesPerSec / 1_048_576.0);
     }
 
@@ -110,4 +120,3 @@ public class FTPFile {
         return (isDirectory ? "[DIR]  " : "[FILE] ") + name + " (" + formatSize(size) + ")";
     }
 }
-

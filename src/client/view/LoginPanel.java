@@ -17,7 +17,7 @@ public class LoginPanel extends JPanel {
     private final JPasswordField passField = new JPasswordField("123456", 8);
     private final JCheckBox chkAnonymous = new JCheckBox("Ẩn danh");
     private final JButton btnConnect = new JButton("Kết nối nhanh");
-    private final JButton btnSiteManager = new JButton("📁 Quản lý Site");
+    private final JButton btnSiteManager = new JButton("Quan ly Site");
 
     private String savedUser = "user01";
     private String savedPass = "123456";
@@ -28,6 +28,10 @@ public class LoginPanel extends JPanel {
     public LoginPanel() {
         setLayout(new FlowLayout(FlowLayout.LEFT, 10, 8));
         setBorder(BorderFactory.createTitledBorder(" Kết nối nhanh (Quickconnect) "));
+
+        btnConnect.setFont(UITheme.APP_FONT_BOLD);
+        btnConnect.setBackground(AppColors.accent());
+        btnConnect.setForeground(Color.WHITE);
 
         add(new JLabel("Máy chủ:"));
         add(hostField);
@@ -47,7 +51,6 @@ public class LoginPanel extends JPanel {
         userField.addActionListener(submitAction);
         passField.addActionListener(submitAction);
 
-        // Sự kiện khi tick/bỏ tick Đăng nhập ẩn danh
         chkAnonymous.addActionListener(e -> {
             if (chkAnonymous.isSelected()) {
                 savedUser = userField.getText();

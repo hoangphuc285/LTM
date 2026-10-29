@@ -16,15 +16,15 @@ import java.util.function.Consumer;
 public class SearchDialog extends JDialog {
     private final JTextField txtKeyword = new JTextField(20);
     private final JCheckBox chkRecursive = new JCheckBox("Tìm kiếm đệ quy thư mục con", true);
-    private final JButton btnSearch = new JButton("🔍 Bắt đầu tìm");
-    private final JButton btnStop = new JButton("⏹ Dừng");
+    private final JButton btnSearch = new JButton("Bat dau tim");
+    private final JButton btnStop = new JButton("Dung");
 
     private final DefaultTableModel tableModel;
     private final JTable resultTable;
     private final JLabel lblStatus = new JLabel("Nhập từ khóa và bấm Tìm kiếm.");
 
-    private final JButton btnDownload = new JButton("⬇ Tải về mục này");
-    private final JButton btnGoToDir = new JButton("📂 Đi tới thư mục");
+    private final JButton btnDownload = new JButton("Tai ve muc nay");
+    private final JButton btnGoToDir = new JButton("Di toi thu muc");
     private final JButton btnClose = new JButton("Đóng");
 
     private final String host;

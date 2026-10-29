@@ -24,10 +24,10 @@ public class Server {
 
         // Hiển thị trạng thái kết nối MySQL trực tiếp lên màn hình Server GUI
         if (userManager.isDatabaseConnected()) {
-            gui.log("✅ [MySQL] Kết nối thành công! Đang sử dụng CSDL 'ftp_server_db'.");
+            gui.log("[OK] [MySQL] Ket noi thanh cong! Dang su dung CSDL 'ftp_server_db'.");
         } else {
-            gui.log("⚠️ [MySQL] " + DBConnection.getStatusMessage());
-            gui.log("ℹ️ [Server] Chưa bật MySQL trong XAMPP -> Đang dùng danh sách user dự phòng.");
+            gui.log("[CANH BAO] [MySQL] " + DBConnection.getStatusMessage());
+            gui.log("[INFO] [Server] Chua bat MySQL trong XAMPP -> Dang dung danh sach user du phong.");
         }
 
         try {

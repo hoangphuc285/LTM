@@ -1,17 +1,14 @@
 package client;
 
 import client.view.MainFrame;
+import client.view.UITheme;
 
 import javax.swing.*;
 
-/**
- * Điểm khởi chạy chính của FTP Client
- */
 public class ClientMain {
     public static void main(String[] args) {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception ignored) {}
+        // Thiet lap giao dien FlatLaf tu cau hinh da luu (hoac mac dinh la Light)
+        client.view.ThemeManager.loadSaved();
 
         SwingUtilities.invokeLater(() -> {
             MainFrame mainFrame = new MainFrame();
@@ -19,4 +16,3 @@ public class ClientMain {
         });
     }
 }
-

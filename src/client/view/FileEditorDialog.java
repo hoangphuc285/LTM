@@ -10,8 +10,8 @@ import java.util.function.Consumer;
 public class FileEditorDialog extends JDialog {
     private final JTextArea textArea = new JTextArea();
     private final JLabel lblStatus = new JLabel();
-    private final JButton btnSave = new JButton("💾 Lưu & Cập nhật");
-    private final JButton btnOpenExternal = new JButton("🖥️ Mở bằng phần mềm ngoài");
+    private final JButton btnSave = new JButton("Luu va Cap nhat");
+    private final JButton btnOpenExternal = new JButton("Mo bang phan mem ngoai");
     private final JButton btnClose = new JButton("Đóng");
 
     private final File targetFile;
